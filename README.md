@@ -90,7 +90,29 @@ export ANDROID_NDK_HOME=/path/to/android-ndk
 
 ## 配置
 
-编辑 `config.json` 配置文件:
+复制配置文件模板并填入你的API密钥:
+
+```bash
+cp config.example.json config.json
+# 编辑 config.json 填入你的 API Key
+```
+
+或使用环境变量 `${MINIMAX_API_KEY}`:
+
+```json
+{
+    "model": {
+        "api_key": "${MINIMAX_API_KEY}",
+        ...
+    }
+}
+```
+
+然后设置环境变量:
+
+```bash
+export MINIMAX_API_KEY="your-api-key-here"
+```
 
 ```json
 {
@@ -185,7 +207,7 @@ drwxr-xr-x  2 jason jason 4096 Apr  6 16:30 ..
 ClawAgent/
 ├── CMakeLists.txt          # CMake构建文件
 ├── build.sh                # 编译脚本
-├── config.json             # 配置文件
+├── config.example.json     # 配置模板
 ├── README.md               # 本文档
 ├── docs/                   # 开发日记
 ├── include/                # 头文件
@@ -199,11 +221,10 @@ ClawAgent/
 ├── src/                    # 源文件
 ├── tests/                  # 测试
 │   ├── test_config.cpp     # 配置测试
-│   ├── test_message.cpp     # 消息测试
+│   ├── test_message.cpp    # 消息测试
 │   └── test_tool.cpp       # 工具测试
-└── thirdparty/             # 第三方库
-    ├── gtest/              # Google Test
-    └── nlohmann/           # JSON库
+└── thirdparty/             # 第三方库 (FetchContent自动下载)
+    └── nlohmann/           # JSON单文件头库
 ```
 
 ## 工具说明

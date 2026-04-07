@@ -3,11 +3,31 @@
 
 #include <fstream>
 #include <sstream>
+#include <regex>
+#include <cstdlib>
 
 using namespace ClawAgent;
 
 ConfigManager::ConfigManager(const std::string& config_path)
     : config_path_(config_path) {
+}
+
+std::string ConfigManager::expandEnvVars(const std::string& value) const {
+    std::regex envVarRegex(R"(\$\{([^}]+)\})");
+    std::string result = value;
+    std::smatch match;
+
+    std::string::const_iterator searchStart(result.cbegin());
+    while (std::regex_search(searchStart, result.cend(), match, envVarRegex)) {
+        const char* envValue = std::getenv(match[1].str().c_str());
+        if (envValue) {
+            result.replace(match[0].first, match[0].second, envValue);
+            searchStart = match[0].first + strlen(envValue);
+        } else {
+            searchStart = match[0].second;
+        }
+    }
+    return result;
 }
 
 ConfigManager::~ConfigManager() = default;
@@ -56,7 +76,7 @@ ConfigManager::ModelConfig ConfigManager::getModelConfig() const {
 
     cfg.provider = model.value("provider", "openai");
     cfg.name = model.value("name", "gpt-4");
-    cfg.api_key = model.value("api_key", "");
+    cfg.api_key = expandEnvVars(model.value("api_key", ""));
     cfg.base_url = model.value("base_url", "https://api.openai.com/v1");
     cfg.stream = model.value("stream", true);
     cfg.timeout_ms = model.value("timeout_ms", 120000);

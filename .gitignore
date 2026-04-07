@@ -3,6 +3,10 @@ build/
 *.cmake
 !CMakeLists.txt
 
+# Config files (use config.example.json as template)
+config.json
+*.local.json
+
 # Compiled files
 *.o
 *.a

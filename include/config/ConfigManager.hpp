@@ -81,6 +81,7 @@ public:
 private:
     json config_;
     std::string config_path_;
+    std::string expandEnvVars(const std::string& value) const;
 };
 
 template<typename T>
