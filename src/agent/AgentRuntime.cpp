@@ -4,6 +4,7 @@
 #include "message/MessageManager.hpp"
 #include "tools/ToolManager.hpp"
 #include "utils/Logger.hpp"
+#include "utils/Output.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -30,6 +31,10 @@ AgentRuntime::AgentRuntime(std::shared_ptr<ConfigManager> config,
     stats_.total_tokens_used = 0;
     stats_.total_time_ms = 0;
     stats_.stopped = false;
+
+    // 初始化输出管理器
+    auto output_config = config_->getOutputConfig();
+    Output::instance().init(output_config.color_output, output_config.show_tools);
 }
 
 AgentRuntime::~AgentRuntime() = default;
@@ -99,7 +104,6 @@ bool AgentRuntime::run(const std::string& user_input, std::string& final_respons
 
 bool AgentRuntime::step(const std::string& user_input, std::string& response) {
     auto agent_config = config_->getAgentConfig();
-    auto output_config = config_->getOutputConfig();
 
     // 检查停止条件
     if (shouldStop()) {
@@ -126,9 +130,7 @@ bool AgentRuntime::step(const std::string& user_input, std::string& response) {
     // 调用LLM
     LLMResponse llm_response;
 
-    if (output_config.show_tools) {
-        std::cout << "\n[调用模型...]" << std::endl;
-    }
+    Output::instance().printCallingModel();
 
     // 检查是否启用流式
     auto model_config = config_->getModelConfig();
@@ -137,7 +139,7 @@ bool AgentRuntime::step(const std::string& user_input, std::string& response) {
     if (use_streaming) {
         // 流式模式：实时输出到终端
         if (!llm_->chat(all_messages, tool_defs, llm_response,
-            [&output_config](const std::string& text) {
+            [](const std::string& text) {
                 std::cout << text << std::flush;
             })) {
             response = "LLM调用失败: " + llm_response.content;
@@ -157,10 +159,7 @@ bool AgentRuntime::step(const std::string& user_input, std::string& response) {
     // 处理响应
     if (!llm_response.tool_calls.empty()) {
         // 有工具调用
-        if (output_config.show_tools) {
-            std::cout << "\n[检测到 " << llm_response.tool_calls.size()
-                      << " 个工具调用]" << std::endl;
-        }
+        Output::instance().printToolCalls(llm_response.tool_calls.size());
 
         stats_.total_tool_calls += llm_response.tool_calls.size();
 
@@ -184,27 +183,20 @@ bool AgentRuntime::step(const std::string& user_input, std::string& response) {
 
         // 逐个执行工具并添加工具结果消息
         for (const auto& call : llm_response.tool_calls) {
-            if (output_config.show_tools) {
-                std::cout << "\n[执行工具: " << call.name << "]" << std::endl;
-                if (!call.arguments.empty()) {
-                    std::cout << "  参数: " << call.arguments.dump() << std::endl;
-                }
+            Output::instance().printExecutingTool(call.name);
+            if (!call.arguments.empty()) {
+                Output::instance().printToolParams(call.arguments.dump());
             }
 
             auto result = tools_->executeTool(call.name, call.arguments, call.id);
 
-            if (output_config.show_tools) {
-                if (result.success) {
-                    std::cout << "  结果: " << result.result.substr(0, 200);
-                    if (result.result.length() > 200) {
-                        std::cout << "...";
-                    }
-                    std::cout << std::endl;
-                } else {
-                    std::cout << "  错误: " << result.error_message << std::endl;
-                }
-                std::cout << "  耗时: " << result.execution_time_ms << "ms" << std::endl;
+            if (result.success) {
+                bool truncated = result.result.length() > 200;
+                Output::instance().printToolResult(result.result.substr(0, 200), truncated);
+            } else {
+                Output::instance().printToolError(result.error_message);
             }
+            Output::instance().printToolTime(result.execution_time_ms);
 
             // 添加工具结果消息（每个工具调用单独一条消息）
             ChatMessage tool_msg;
@@ -224,35 +216,6 @@ bool AgentRuntime::step(const std::string& user_input, std::string& response) {
         messages_->addMessage("assistant", llm_response.content);
         return true;
     }
-}
-
-std::string AgentRuntime::executeToolsFormatted(const std::vector<ToolCall>& tool_calls) {
-    auto output_config = config_->getOutputConfig();
-    std::stringstream ss;
-
-    for (const auto& call : tool_calls) {
-        if (output_config.show_tools) {
-            std::cout << "\n[执行工具: " << call.name << "]" << std::endl;
-            if (!call.arguments.empty()) {
-                std::cout << "  参数: " << call.arguments.dump() << std::endl;
-            }
-        }
-
-        auto result = tools_->executeTool(call.name, call.arguments, call.id);
-
-        if (output_config.show_tools) {
-            std::cout << "  结果: " << result.result.substr(0, 200);
-            if (result.result.length() > 200) {
-                std::cout << "...";
-            }
-            std::cout << std::endl;
-            std::cout << "  耗时: " << result.execution_time_ms << "ms" << std::endl;
-        }
-
-        ss << "工具[" << call.name << "]结果:\n" << result.result << "\n\n";
-    }
-
-    return ss.str();
 }
 
 bool AgentRuntime::shouldStop() {

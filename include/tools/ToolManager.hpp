@@ -109,10 +109,10 @@ private:
 class SystemTools {
 public:
     // 读取文件
-    static std::string readFile(const std::string& filepath);
+    static ToolExecutionResult readFile(const std::string& filepath);
 
     // 写入文件
-    static bool writeFile(const std::string& filepath, const std::string& content);
+    static ToolExecutionResult writeFile(const std::string& filepath, const std::string& content);
 
     // 执行命令
     static ToolExecutionResult execCommand(const std::string& command,

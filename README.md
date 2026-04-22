@@ -186,6 +186,8 @@ ClawAgent/
 │   ├── tools/              # 工具系统
 │   ├── agent/              # Agent运行时
 │   └── utils/              # 工具类
+│       ├── Logger.hpp      # 日志系统
+│       └── Output.hpp      # 统一输出层
 ├── src/                    # 源文件
 ├── tests/                  # 测试
 │   ├── test_config.cpp     # 配置测试

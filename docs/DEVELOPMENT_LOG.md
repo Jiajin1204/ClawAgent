@@ -140,6 +140,70 @@ if (role == "assistant" && !content_blocks.empty()) {
 - `config.openai.json` - OpenAI 配置模板（qwen-plus）
 - `config.anthropic.json` - Anthropic 配置模板（MiniMax-M2.7）
 
+## 2026-04-22
+
+### 代码质量重构
+
+**目标**: 提升代码可读性、可维护性，统一输出风格
+
+#### 1. 修复 exec 超时 bug
+
+**问题**: `read()` 在非阻塞模式下，`n == 0` 被误判为 EOF，实际上 `n == -1 && errno == EAGAIN` 才表示无数据可读
+
+**修复**:
+```cpp
+ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
+if (n > 0) {
+    output += buffer;
+} else if (n == -1) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        usleep(10000);  // 等待后重试
+        continue;
+    }
+    break;
+} else {
+    break;  // n == 0 表示 EOF
+}
+```
+
+#### 2. 统一 read/write/exec 返回风格
+
+**问题**: read 抛异常，write 返回 bool，exec 返回 ToolExecutionResult，风格不统一
+
+**修复**: 三个工具都返回 `ToolExecutionResult`，语义清晰：
+- `result.result` - 存储实际输出/结果
+- `result.error_message` - 存储错误描述
+- `result.success` - 布尔状态
+
+#### 3. 新增统一输出层 Output
+
+**目的**: 分离用户可见输出与系统日志
+
+| 类 | 用途 |
+|----|------|
+| `Logger` | 系统日志，记录运行状态，可写入文件 |
+| `Output` | 用户可见输出，仅输出到终端，支持颜色 |
+
+#### 4. 清理 Tool 描述
+
+**问题**: description 中包含参数说明，与 OpenAI tool schema 规范不符
+
+**修复**: description 只保留功能描述，parameters 包含完整参数定义
+
+#### 5. 删除死代码
+
+移除未使用的 `executeToolsFormatted()` 函数
+
+#### 修改的文件
+
+- `src/tools/ToolManager.cpp` - 统一返回风格，修复超时 bug
+- `include/tools/ToolManager.hpp` - 更新函数签名
+- `src/agent/AgentRuntime.cpp` - 使用 Output 类
+- `src/ClawAgent.cpp` - 使用 Output 类
+- `include/utils/Output.hpp` - 新增统一输出层
+- `src/utils/Output.cpp` - 新增统一输出层
+- `CMakeLists.txt` - 添加 Output 源文件
+
 ---
 
 **开发人员**: Claude Code

@@ -13,34 +13,61 @@ using namespace ClawAgent;
 
 // ============ SystemTools Implementation ============
 
-std::string SystemTools::readFile(const std::string& filepath) {
+ToolExecutionResult SystemTools::readFile(const std::string& filepath) {
+    ToolExecutionResult result;
+    auto start_time = std::chrono::high_resolution_clock::now();
+
     std::ifstream file(filepath, std::ios::binary | std::ios::ate);
 
     if (!file.is_open()) {
-        throw std::runtime_error("无法打开文件: " + filepath);
+        result.success = false;
+        result.error_message = "无法打开文件: " + filepath;
+    } else {
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        std::string content(size, '\0');
+        if (!file.read(&content[0], size)) {
+            result.success = false;
+            result.error_message = "读取文件失败: " + filepath;
+        } else {
+            result.success = true;
+            result.result = content;
+        }
     }
 
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
+    auto end_time = std::chrono::high_resolution_clock::now();
+    result.execution_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        end_time - start_time).count();
 
-    std::string content(size, '\0');
-    if (!file.read(&content[0], size)) {
-        throw std::runtime_error("读取文件失败: " + filepath);
-    }
-
-    return content;
+    return result;
 }
 
-bool SystemTools::writeFile(const std::string& filepath, const std::string& content) {
+ToolExecutionResult SystemTools::writeFile(const std::string& filepath, const std::string& content) {
+    ToolExecutionResult result;
+    auto start_time = std::chrono::high_resolution_clock::now();
+
     std::ofstream file(filepath, std::ios::binary | std::ios::trunc);
 
     if (!file.is_open()) {
-        LOG_ERROR("无法创建文件: " + filepath);
-        return false;
+        result.success = false;
+        result.error_message = "无法创建文件: " + filepath;
+    } else {
+        file.write(content.data(), content.size());
+        if (file.good()) {
+            result.success = true;
+            result.result = filepath;  // 成功时返回文件路径
+        } else {
+            result.success = false;
+            result.error_message = "写入文件失败: " + filepath;
+        }
     }
 
-    file.write(content.data(), content.size());
-    return file.good();
+    auto end_time = std::chrono::high_resolution_clock::now();
+    result.execution_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        end_time - start_time).count();
+
+    return result;
 }
 
 ToolExecutionResult SystemTools::execCommand(const std::string& command,
@@ -52,6 +79,8 @@ ToolExecutionResult SystemTools::execCommand(const std::string& command,
     if (!pipe) {
         result.success = false;
         result.error_message = "无法执行命令";
+        result.execution_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - start_time).count();
         return result;
     }
 
@@ -62,7 +91,6 @@ ToolExecutionResult SystemTools::execCommand(const std::string& command,
 
     std::string output;
     char buffer[4096];
-    bool timed_out = false;
 
     auto deadline = std::chrono::high_resolution_clock::now() +
                    std::chrono::milliseconds(timeout_ms);
@@ -70,10 +98,12 @@ ToolExecutionResult SystemTools::execCommand(const std::string& command,
     while (true) {
         auto now = std::chrono::high_resolution_clock::now();
         if (now >= deadline) {
-            timed_out = true;
             pclose(pipe);
             result.success = false;
             result.error_message = "命令执行超时";
+            result.result = output;
+            result.execution_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - start_time).count();
             return result;
         }
 
@@ -81,11 +111,18 @@ ToolExecutionResult SystemTools::execCommand(const std::string& command,
         if (n > 0) {
             buffer[n] = '\0';
             output += buffer;
-        } else if (n == 0) {
+        } else if (n == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // 无数据可读，非阻塞模式正常情况，等待后重试
+                usleep(10000);  // 10ms
+                continue;
+            }
+            // 其他错误
+            break;
+        } else {
+            // n == 0 表示 EOF（管道关闭）
             break;
         }
-
-        usleep(10000);  // 10ms
     }
 
     int status = pclose(pipe);
@@ -174,7 +211,7 @@ void ToolManager::registerDefaultTools() {
     if (enable_read_) {
         Tool read_tool;
         read_tool.name = "read";
-        read_tool.description = "读取文件内容。参数：filepath（文件路径）。返回文件内容。";
+        read_tool.description = "读取指定路径的文件内容并返回";
         read_tool.type = Tool::Type::Read;
         read_tool.parameters = json{
             {"type", "object"},
@@ -193,7 +230,7 @@ void ToolManager::registerDefaultTools() {
     if (enable_write_) {
         Tool write_tool;
         write_tool.name = "write";
-        write_tool.description = "写入内容到文件。参数：filepath（文件路径），content（要写入的内容）。返回是否成功。";
+        write_tool.description = "将内容写入指定路径的文件";
         write_tool.type = Tool::Type::Write;
         write_tool.parameters = json{
             {"type", "object"},
@@ -216,7 +253,7 @@ void ToolManager::registerDefaultTools() {
     if (enable_exec_) {
         Tool exec_tool;
         exec_tool.name = "exec";
-        exec_tool.description = "执行命令或shell脚本。参数：command（要执行的命令）。返回命令输出。";
+        exec_tool.description = "执行Linux命令或shell脚本并返回输出结果";
         exec_tool.type = Tool::Type::Exec;
         exec_tool.parameters = json{
             {"type", "object"},
@@ -290,17 +327,15 @@ ToolExecutionResult ToolManager::executeTool(const std::string& tool_name,
         switch (tool.type) {
             case Tool::Type::Read: {
                 std::string filepath = arguments.at("filepath").get<std::string>();
-                result.result = SystemTools::readFile(filepath);
-                result.success = true;
+                result = SystemTools::readFile(filepath);
                 break;
             }
             case Tool::Type::Write: {
                 std::string filepath = arguments.at("filepath").get<std::string>();
                 std::string content = arguments.at("content").get<std::string>();
-                result.success = SystemTools::writeFile(filepath, content);
-                result.result = result.success ? "文件写入成功" : "文件写入失败";
-                if (!result.success) {
-                    result.error_message = "无法写入文件: " + filepath + "，请检查权限或路径是否正确";
+                result = SystemTools::writeFile(filepath, content);
+                if (!result.success && result.error_message.empty()) {
+                    result.error_message = "无法写入文件: " + filepath;
                 }
                 break;
             }

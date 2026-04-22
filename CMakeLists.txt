@@ -53,6 +53,7 @@ set(SOURCES
     src/tools/ToolManager.cpp
     src/agent/AgentRuntime.cpp
     src/utils/Logger.cpp
+    src/utils/Output.cpp
 )
 
 # Header files
@@ -65,6 +66,7 @@ set(HEADERS
     include/tools/ToolManager.hpp
     include/agent/AgentRuntime.hpp
     include/utils/Logger.hpp
+    include/utils/Output.hpp
 )
 
 # Create executable
