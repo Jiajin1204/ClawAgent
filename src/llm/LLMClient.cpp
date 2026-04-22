@@ -360,7 +360,13 @@ bool LLMClient::parseOpenAIResponse(const std::string& response_str,
                     ToolCall call;
                     call.id = tc["id"];
                     call.name = tc["function"]["name"];
-                    call.arguments = tc["function"]["arguments"];
+                    // arguments can be string or already-parsed object
+                    auto& args_val = tc["function"]["arguments"];
+                    if (args_val.is_string()) {
+                        call.arguments = json::parse(args_val.get<std::string>());
+                    } else {
+                        call.arguments = args_val;
+                    }
                     response.tool_calls.push_back(call);
                 }
             }

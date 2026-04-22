@@ -91,36 +91,54 @@ src/
 4. MiniMax API 端点和模型名称
 5. 终端流式输出实时显示
 
-## 技术笔记
+## 2026-04-21
 
-### C++17特性使用
+### OpenAI 工具调用修复
 
-- `std::string_view`: 避免不必要的字符串拷贝
-- `std::optional`: 表示可能不存在的值
-- `std::variant`: 类型安全的联合
-- `std::make_unique`: 安全的内存管理
-- `std::shared_mutex`: 读写锁实现
+**问题描述**: 使用 OpenAI API (qwen-plus) 进行工具调用时失败，报错 "cannot use at() with string"
 
-### JSON处理
+**根本原因**:
 
-使用nlohmann/json，优点：
-- 单一头文件，方便集成
-- API设计优雅
-- 完善的文档
+1. **LLMClient.cpp:363** - `arguments` 字段可能是字符串或 JSON 对象，但原代码直接赋值
+2. **Message.cpp:31** - 带有 `tool_calls` 的 assistant 消息格式不正确，content 应为字符串，tool_calls 应为独立数组
 
-### libcurl使用注意
+**修复内容**:
 
-1. CURL容易出错，需要检查返回值
-2. 设置合适的超时时间
-3. 处理SSL证书验证
-4. 流式响应需要特殊处理SSE格式
+1. `src/llm/LLMClient.cpp`:
+```cpp
+auto& args_val = tc["function"]["arguments"];
+if (args_val.is_string()) {
+    call.arguments = json::parse(args_val.get<std::string>());
+} else {
+    call.arguments = args_val;
+}
+```
 
-## 下一步计划
+2. `src/message/Message.cpp`:
+```cpp
+if (role == "assistant" && !content_blocks.empty()) {
+    j["content"] = content;  // 保持为字符串
+    json tool_calls = json::array();
+    for (const auto& block : content_blocks) {
+        if (block.contains("type") && block["type"] == "tool_use") {
+            json tc;
+            tc["id"] = block.value("id", "");
+            tc["type"] = "function";
+            tc["function"]["name"] = block.value("name", "");
+            tc["function"]["arguments"] = block.value("input", json::object()).dump();
+            tool_calls.push_back(tc);
+        }
+    }
+    if (!tool_calls.empty()) {
+        j["tool_calls"] = tool_calls;
+    }
+}
+```
 
-1. 编译测试
-2. 功能验证
-3. 添加更多工具
-4. 优化消息压缩
+### 新增配置文件
+
+- `config.openai.json` - OpenAI 配置模板（qwen-plus）
+- `config.anthropic.json` - Anthropic 配置模板（MiniMax-M2.7）
 
 ---
 

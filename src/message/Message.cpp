@@ -22,8 +22,31 @@ json ClawAgent::Message::toJson() const {
     json j;
     j["role"] = role;
 
-    // 如果有content_blocks，使用它们作为content
-    if (!content_blocks.empty()) {
+    // For assistant messages with tool_use blocks (OpenAI format):
+    // - content should be a string (the text content from LLM)
+    // - tool_calls should be an array
+    // We do NOT put content_blocks in the "content" field for OpenAI compatibility
+    if (role == "assistant" && !content_blocks.empty()) {
+        // content stays as string (may be empty if LLM only returned tool calls)
+        j["content"] = content;
+
+        // Add tool_calls array for OpenAI
+        json tool_calls = json::array();
+        for (const auto& block : content_blocks) {
+            if (block.contains("type") && block["type"] == "tool_use") {
+                json tc;
+                tc["id"] = block.value("id", "");
+                tc["type"] = "function";
+                tc["function"]["name"] = block.value("name", "");
+                tc["function"]["arguments"] = block.value("input", json::object()).dump();
+                tool_calls.push_back(tc);
+            }
+        }
+        if (!tool_calls.empty()) {
+            j["tool_calls"] = tool_calls;
+        }
+    } else if (!content_blocks.empty()) {
+        // For other cases (shouldn't happen normally), use content_blocks
         j["content"] = content_blocks;
     } else {
         j["content"] = content;

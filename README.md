@@ -78,7 +78,7 @@ export ANDROID_NDK_HOME=/path/to/android-ndk
 ## 运行
 
 ```bash
-# 运行主程序
+# 运行主程序（注意：二进制文件在 build/linux/ 目录下）
 ./build/linux/clawagent
 
 # 或直接运行
@@ -90,64 +90,30 @@ export ANDROID_NDK_HOME=/path/to/android-ndk
 
 ## 配置
 
-复制配置文件模板并填入你的API密钥:
+项目提供两个配置文件模板：
+
+- `config.openai.json` - OpenAI 兼容接口配置（qwen-plus）
+- `config.anthropic.json` - Anthropic 兼容接口配置（MiniMax-M2.7）
+
+**注意**: 请勿将包含真实 API Key 的配置文件提交到仓库！
 
 ```bash
-cp config.example.json config.json
+# 使用 OpenAI 配置
+cp config.openai.json config.json
+# 编辑 config.json 填入你的 API Key
+
+# 或使用 Anthropic 配置
+cp config.anthropic.json config.json
 # 编辑 config.json 填入你的 API Key
 ```
 
-或使用环境变量 `${MINIMAX_API_KEY}`:
+或使用环境变量:
 
 ```json
 {
     "model": {
-        "api_key": "${MINIMAX_API_KEY}",
+        "api_key": "${YOUR_API_KEY}",
         ...
-    }
-}
-```
-
-然后设置环境变量:
-
-```bash
-export MINIMAX_API_KEY="your-api-key-here"
-```
-
-```json
-{
-    "model": {
-        "provider": "anthropic",
-        "name": "MiniMax-M2.7",
-        "api_key": "your-api-key",
-        "base_url": "https://api.minimaxi.com/anthropic/v1",
-        "stream": true,
-        "timeout_ms": 120000
-    },
-    "message": {
-        "max_history": 20,
-        "persist_path": "./messages",
-        "enable_compression": false
-    },
-    "agent": {
-        "system_prompt": "你是一个有帮助的AI助手。",
-        "max_iterations": 50,
-        "stop_on_error": true
-    },
-    "tools": {
-        "enable_read": true,
-        "enable_write": true,
-        "enable_exec": true,
-        "exec_timeout_ms": 300000
-    },
-    "output": {
-        "show_tools": true,
-        "show_thinking": false,
-        "color_output": true
-    },
-    "logging": {
-        "level": "info",
-        "file": "./clawagent.log"
     }
 }
 ```
@@ -157,7 +123,7 @@ export MINIMAX_API_KEY="your-api-key-here"
 | 配置项 | 说明 |
 |--------|------|
 | `model.provider` | 模型提供商: `openai` 或 `anthropic` |
-| `model.name` | 模型名称 (如 MiniMax-M2.7) |
+| `model.name` | 模型名称 (如 qwen-plus, MiniMax-M2.7) |
 | `model.api_key` | API密钥 |
 | `model.base_url` | API基础URL |
 | `model.stream` | 是否启用流式输出 |
@@ -207,7 +173,9 @@ drwxr-xr-x  2 jason jason 4096 Apr  6 16:30 ..
 ClawAgent/
 ├── CMakeLists.txt          # CMake构建文件
 ├── build.sh                # 编译脚本
-├── config.example.json     # 配置模板
+├── config.example.json     # 配置模板（环境变量版本）
+├── config.openai.json      # OpenAI配置文件模板
+├── config.anthropic.json   # Anthropic配置文件模板
 ├── README.md               # 本文档
 ├── docs/                   # 开发日记
 ├── include/                # 头文件
