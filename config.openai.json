@@ -13,7 +13,8 @@
         "enable_compression": false
     },
     "agent": {
-        "system_prompt": "你是一个运行在Linux/Ubuntu系统上的智能助手。你可以通过工具来完成任务，包括读写文件和执行命令。请使用中文回复。",
+        "system_prompt_path": "./system_prompt.md",
+        "system_prompt": "你是一个有帮助的AI助手。",
         "max_iterations": 50,
         "stop_on_error": true
     },

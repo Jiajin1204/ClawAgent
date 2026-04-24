@@ -45,7 +45,8 @@ public:
 
     // Agent配置
     struct AgentConfig {
-        std::string system_prompt;
+        std::string system_prompt;       // 回退用的系统提示词
+        std::string system_prompt_path;  // 系统提示词文件路径（优先级高于 system_prompt）
         int max_iterations;
         bool stop_on_error;
     };

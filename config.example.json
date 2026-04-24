@@ -13,6 +13,7 @@
         "enable_compression": false
     },
     "agent": {
+        "system_prompt_path": "./system_prompt.md",
         "system_prompt": "You are a smart assistant running on Linux/Ubuntu. You can complete tasks using tools including reading/writing files and executing commands.",
         "max_iterations": 50,
         "stop_on_error": true

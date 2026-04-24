@@ -103,8 +103,24 @@ ConfigManager::AgentConfig ConfigManager::getAgentConfig() const {
 
     cfg.system_prompt = agent.value("system_prompt",
         "你是一个有帮助的AI助手。");
+    cfg.system_prompt_path = agent.value("system_prompt_path", "");
     cfg.max_iterations = agent.value("max_iterations", 50);
     cfg.stop_on_error = agent.value("stop_on_error", true);
+
+    // 如果配置了 system_prompt_path，尝试从文件读取
+    if (!cfg.system_prompt_path.empty()) {
+        std::ifstream file(cfg.system_prompt_path);
+        if (file.is_open()) {
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            cfg.system_prompt = buffer.str();
+            // 去除末尾的空白字符
+            size_t end = cfg.system_prompt.find_last_not_of(" \t\n\r");
+            if (end != std::string::npos) {
+                cfg.system_prompt = cfg.system_prompt.substr(0, end + 1);
+            }
+        }
+    }
 
     return cfg;
 }

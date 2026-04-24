@@ -143,7 +143,32 @@ cp config.openai.json config.json
 | `model.stream` | 是否启用流式输出 |
 | `message.max_history` | 最大历史消息条数 |
 | `agent.max_iterations` | Agent最大迭代次数（防止无限循环）|
+| `agent.system_prompt` | 系统提示词（回退值） |
+| `agent.system_prompt_path` | 系统提示词文件路径（优先级高于 system_prompt）|
 | `tools.enable_*` | 启用/禁用各工具 |
+
+### 系统提示词文件
+
+对于较长的系统提示词，可以使用独立的 Markdown 文件来配置，避免 JSON 中的转义问题：
+
+```bash
+# 1. 创建系统提示词文件
+echo "你是一个有帮助的AI助手。" > system_prompt.md
+
+# 2. 在 config.json 中指定文件路径
+{
+    "agent": {
+        "system_prompt_path": "./system_prompt.md",
+        "system_prompt": "回退提示词（当文件不存在时使用）",
+        ...
+    }
+}
+```
+
+**优先级**：`system_prompt_path` > `system_prompt`
+
+- 如果 `system_prompt_path` 指向的文件存在，读取文件内容作为系统提示词
+- 如果文件不存在或路径为空，使用 `system_prompt` 作为回退
 
 ## 使用
 
