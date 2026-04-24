@@ -1,9 +1,9 @@
 {
     "model": {
-        "provider": "anthropic",
-        "name": "MiniMax-M2.7",
-        "api_key": "sk-cp-uQSpmjT2QNtE-9OD0ftIrkHRucelHlfcR744pv2vgKZLPftuewbZCzV8nztdrwemyINF1DmltnDJiUyqnR26JxVrQ9evJiTGi4grefRM2X730ZYSKdefPFs",
-        "base_url": "https://api.minimaxi.com/anthropic/v1",
+        "provider": "openai",
+        "name": "qwen-plus",
+        "api_key": "sk-34459eee3dfd49809a945e198b377b3e",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "stream": true,
         "timeout_ms": 120000
     },

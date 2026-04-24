@@ -1,6 +1,6 @@
 #include "agent/AgentRuntime.hpp"
 #include "config/ConfigManager.hpp"
-#include "llm/LLMClient.hpp"
+#include "llm/LlmClientFactory.hpp"
 #include "message/MessageManager.hpp"
 #include "tools/ToolManager.hpp"
 #include "utils/Logger.hpp"
@@ -15,7 +15,7 @@
 using namespace ClawAgent;
 
 AgentRuntime::AgentRuntime(std::shared_ptr<ConfigManager> config,
-                           std::shared_ptr<LLMClient> llm,
+                           std::shared_ptr<ILlmClient> llm,
                            std::shared_ptr<MessageManager> messages,
                            std::shared_ptr<ToolManager> tools)
     : config_(config)
@@ -132,26 +132,10 @@ bool AgentRuntime::step(const std::string& user_input, std::string& response) {
 
     Output::instance().printCallingModel();
 
-    // 检查是否启用流式
-    auto model_config = config_->getModelConfig();
-    bool use_streaming = model_config.stream && tool_defs.empty();
-
-    if (use_streaming) {
-        // 流式模式：实时输出到终端
-        if (!llm_->chat(all_messages, tool_defs, llm_response,
-            [](const std::string& text) {
-                std::cout << text << std::flush;
-            })) {
-            response = "LLM调用失败: " + llm_response.content;
-            return false;
-        }
-        std::cout << std::endl; // 流式输出后换行
-    } else {
-        // 非流式模式
-        if (!llm_->chat(all_messages, tool_defs, llm_response)) {
-            response = "LLM调用失败: " + llm_response.content;
-            return false;
-        }
+    // 非流式模式 (接口暂不支持流式回调)
+    if (!llm_->chat(all_messages, tool_defs, llm_response)) {
+        response = "LLM调用失败: " + llm_response.content;
+        return false;
     }
 
     stats_.iterations++;

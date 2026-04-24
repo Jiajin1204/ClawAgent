@@ -204,6 +204,68 @@ if (n > 0) {
 - `src/utils/Output.cpp` - 新增统一输出层
 - `CMakeLists.txt` - 添加 Output 源文件
 
+## 2026-04-24
+
+### LLMClient 重构 - 工厂模式 + 接口分离
+
+**目标**: 遵循"面向接口编程"原则，实现高内聚、低耦合的模块化设计
+
+#### 重构内容
+
+1. **新增接口层** `ILlmClient`
+   - 抽象出 `chat()`、`getProvider()`、`getModelName()`、`healthCheck()` 接口
+   - 所有 LLM 客户端实现必须继承此接口
+
+2. **新增工厂类** `LlmClientFactory`
+   - 根据配置创建对应的 LLM 客户端实例
+   - 支持 OpenAI 和 Anthropic 两种提供商
+
+3. **新增具体客户端**
+   - `OpenAIClient`: OpenAI 兼容接口的标准实现
+   - `AnthropicClient`: Anthropic 兼容接口的标准实现
+
+4. **非标准格式解析**
+   - 支持多种 LLM 输出格式的自动解析
+   - 格式包括:
+     - 标准 OpenAI `tool_calls`
+     - XML 格式 `<tool_call>...</tool_call>`
+     - JSON 对象 `{"tool": "exec", "input": {"command": "pwd"}}`
+     - 函数调用格式 `exec(command="pwd")`
+     - `{"command": "tool_name", "arguments": {...}}`
+
+#### 修复的问题
+
+1. **修复"parameters"被误识为工具名**
+   - `tryParseAsSingleToolCall` 中错误遍历 JSON 键
+   - 移除将 "tool_call" 等键名当作工具名的逻辑
+
+2. **增强 extractToolFromJsonObject**
+   - 支持 `{"tool": ..., "input": {...}}` 格式
+   - 支持 `{"command": "tool_name", "arguments": {...}}` 格式
+
+3. **修复函数调用格式解析**
+   - 确保 `arguments` 始终为 JSON 对象
+   - 避免 `cannot use at() with string` 错误
+
+#### 验证结果
+
+| 配置文件 | 模型 | 提供商 | 状态 |
+|----------|------|--------|------|
+| config.json | qwen-plus | OpenAI | ✅ |
+| config.anthropic.json | MiniMax-M2.7 | Anthropic | ✅ |
+| config.openai.json | qwen3.6-plus-cc | OpenAI | ✅ |
+
+#### 修改的文件
+
+- `include/llm/ILlmClient.hpp` - 新增接口
+- `include/llm/LlmClientFactory.hpp` - 新增工厂
+- `include/llm/OpenAIClient.hpp` - 新增
+- `include/llm/AnthropicClient.hpp` - 新增
+- `src/llm/LlmClientFactory.cpp` - 新增
+- `src/llm/OpenAIClient.cpp` - 新增
+- `src/llm/AnthropicClient.cpp` - 新增
+- `src/llm/LLMClient.cpp.bak` - 备份旧代码（待删除）
+
 ---
 
 **开发人员**: Claude Code

@@ -211,14 +211,14 @@ void ToolManager::registerDefaultTools() {
     if (enable_read_) {
         Tool read_tool;
         read_tool.name = "read";
-        read_tool.description = "读取指定路径的文件内容并返回";
+        read_tool.description = "Read file content";
         read_tool.type = Tool::Type::Read;
         read_tool.parameters = json{
             {"type", "object"},
             {"properties", json{
                 {"filepath", json{
                     {"type", "string"},
-                    {"description", "要读取的文件路径"}
+                    {"description", "Path to file to read"}
                 }}
             }},
             {"required", {"filepath"}}
@@ -230,18 +230,18 @@ void ToolManager::registerDefaultTools() {
     if (enable_write_) {
         Tool write_tool;
         write_tool.name = "write";
-        write_tool.description = "将内容写入指定路径的文件";
+        write_tool.description = "Write content to file";
         write_tool.type = Tool::Type::Write;
         write_tool.parameters = json{
             {"type", "object"},
             {"properties", json{
                 {"filepath", json{
                     {"type", "string"},
-                    {"description", "要写入的文件路径"}
+                    {"description", "Path to file to write"}
                 }},
                 {"content", json{
                     {"type", "string"},
-                    {"description", "要写入的内容"}
+                    {"description", "Content to write"}
                 }}
             }},
             {"required", {"filepath", "content"}}
@@ -253,7 +253,7 @@ void ToolManager::registerDefaultTools() {
     if (enable_exec_) {
         Tool exec_tool;
         exec_tool.name = "exec";
-        exec_tool.description = "执行Linux命令或shell脚本并返回输出结果";
+        exec_tool.description = "Execute shell command";
         exec_tool.type = Tool::Type::Exec;
         exec_tool.parameters = json{
             {"type", "object"},

@@ -40,7 +40,11 @@ if(NO_CURL)
     # Android build without curl - use stub
     set(LLM_CLIENT_SRC src/llm/LLMClientStub.cpp)
 else()
-    set(LLM_CLIENT_SRC src/llm/LLMClient.cpp)
+    set(LLM_CLIENT_SRC
+        src/llm/OpenAIClient.cpp
+        src/llm/AnthropicClient.cpp
+        src/llm/LlmClientFactory.cpp
+    )
 endif()
 
 set(SOURCES

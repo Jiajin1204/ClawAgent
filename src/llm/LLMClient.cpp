@@ -5,6 +5,7 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm>
+#include <regex>
 
 #ifndef NO_CURL
 #include <curl/curl.h>
@@ -370,6 +371,18 @@ bool LLMClient::parseOpenAIResponse(const std::string& response_str,
                     response.tool_calls.push_back(call);
                 }
             }
+
+            // 如果没有标准工具调用，尝试解析 qwen3.6-plus-cc 非标准格式
+            if (response.tool_calls.empty() && !response.content.empty()) {
+                if (response.content.find("<tool_call>") != std::string::npos ||
+                    response.content.find("{\"tool_call\"") != std::string::npos ||
+                    response.content.find("\"name\"") != std::string::npos ||
+                    response.content.find("exec(") != std::string::npos) {
+                    if (parseNonStandardToolCall(response.content, response.tool_calls)) {
+                        Logger::instance().info("检测到非标准工具调用格式");
+                    }
+                }
+            }
         }
 
         response.is_complete = true;
@@ -412,6 +425,221 @@ bool LLMClient::parseSSEStream(const std::string& data,
     } catch (...) {
         return false;
     }
+}
+
+// 解析非标准工具调用格式
+// 支持多种LLM输出格式:
+// 格式1 (XML格式): <tool_call>\n<function=NAME>\n<parameter=KEY>\nVALUE\n
+// 格式2 (JSON格式): {"tool_call":{"function":{"name":"exec","arguments":{"command":"ls -la"}}}}
+// 格式3: {"name": "...", "arguments": {...}} 或 {"tool": "...", "arguments": {...}}
+// 格式4: {"name": {...}} (工具名作为键，参数作为值)
+// 格式5: exec(pwd && ls -l)
+
+namespace {
+
+// 生成唯一的工具调用ID
+std::string generateToolId(size_t index) {
+    return "tool_" + std::to_string(index);
+}
+
+// 从JSON对象中提取工具调用信息
+// 返回true如果成功提取
+bool extractToolFromJsonObject(const json& j, ToolCall& tc, size_t index) {
+    // 检查 {"name": "...", "arguments": {...}} 格式
+    if (j.contains("name") && j.contains("arguments")) {
+        tc.id = generateToolId(index);
+        tc.name = j["name"].get<std::string>();
+        tc.arguments = j["arguments"].is_object() ? j["arguments"] : json::object();
+        return true;
+    }
+    // 检查 {"tool": "...", "arguments": {...}} 格式
+    if (j.contains("tool") && j.contains("arguments")) {
+        tc.id = generateToolId(index);
+        tc.name = j["tool"].get<std::string>();
+        tc.arguments = j["arguments"].is_object() ? j["arguments"] : json::object();
+        return true;
+    }
+    return false;
+}
+
+// 尝试将内容解析为单一工具调用
+// 返回true如果成功
+bool tryParseAsSingleToolCall(const std::string& content, std::vector<ToolCall>& tool_calls) {
+    try {
+        json j = json::parse(content);
+        if (!j.is_object()) return false;
+
+        ToolCall tc;
+        if (extractToolFromJsonObject(j, tc, tool_calls.size())) {
+            tool_calls.push_back(tc);
+            Logger::instance().info("JSON单工具格式: name=" + tc.name);
+            return true;
+        }
+
+        // 检查 {"exec": {"command": "..."}} 格式 (工具名作为键)
+        for (auto& [key, value] : j.items()) {
+            if (value.is_object() && !key.empty()) {
+                tc.id = generateToolId(tool_calls.size());
+                tc.name = key;
+                tc.arguments = value;
+                tool_calls.push_back(tc);
+                Logger::instance().info("JSON工具名作为键格式: name=" + tc.name);
+                return true;
+            }
+        }
+    } catch (...) {
+        // JSON解析失败
+    }
+    return false;
+}
+
+// 尝试解析XML格式的工具调用
+// 格式: <tool_call>\n<function=NAME>\n<parameter=KEY>\nVALUE\n
+void tryParseXmlFormat(const std::string& content, std::vector<ToolCall>& tool_calls) {
+    std::regex xml_pattern(R"(<tool_call>\s*<function=(\w+)>\s*<parameter=(\w+)>\s*([\s\S]+?)(?:\n|$))");
+    std::smatch match;
+    std::string::const_iterator search_start = content.cbegin();
+
+    while (std::regex_search(search_start, content.cend(), match, xml_pattern)) {
+        ToolCall tc;
+        tc.id = generateToolId(tool_calls.size());
+        tc.name = match[1].str();
+        std::string param_name = match[3].str();
+        std::string param_value = match[4].str();
+
+        // 解析参数值
+        try {
+            std::string trimmed = param_value;
+            while (!trimmed.empty() && (trimmed.back() == '\n' || trimmed.back() == '\r')) {
+                trimmed.pop_back();
+            }
+            tc.arguments = json::parse(trimmed);
+        } catch (...) {
+            std::string trimmed = param_value;
+            while (!trimmed.empty() && (trimmed.back() == '\n' || trimmed.back() == '\r')) {
+                trimmed.pop_back();
+            }
+            size_t start = trimmed.find_first_not_of(" \t\r\n");
+            if (start != std::string::npos) {
+                trimmed = trimmed.substr(start);
+            }
+            tc.arguments = json{{param_name, trimmed}};
+        }
+
+        tool_calls.push_back(tc);
+        search_start = match.suffix().first;
+    }
+}
+
+// 尝试解析 {"tool_call": {...}} 格式
+void tryParseToolCallJsonFormat(const std::string& content, std::vector<ToolCall>& tool_calls) {
+    std::regex json_pattern(R"(\{"tool_call":\s*\{)");
+    if (!std::regex_search(content, json_pattern)) return;
+
+    try {
+        size_t start_pos = content.find("{\"tool_call\"");
+        if (start_pos == std::string::npos) return;
+
+        size_t brace_count = 0;
+        size_t end_pos = start_pos;
+        for (size_t i = start_pos; i < content.size(); ++i) {
+            if (content[i] == '{') brace_count++;
+            else if (content[i] == '}') {
+                brace_count--;
+                if (brace_count == 0) {
+                    end_pos = i + 1;
+                    break;
+                }
+            }
+        }
+
+        std::string tool_json_str = content.substr(start_pos, end_pos - start_pos);
+        json tool_json = json::parse(tool_json_str);
+
+        if (tool_json.contains("tool_call") && tool_json["tool_call"].contains("function")) {
+            ToolCall tc;
+            tc.id = generateToolId(0);
+            tc.name = tool_json["tool_call"]["function"].value("name", "");
+            tc.arguments = tool_json["tool_call"]["function"].value("arguments", json::object());
+            tool_calls.push_back(tc);
+        }
+    } catch (const json::parse_error& e) {
+        Logger::instance().warning("解析 tool_call JSON 格式失败: " + std::string(e.what()));
+    }
+}
+
+// 尝试解析函数调用格式: exec(pwd && ls -l)
+void tryParseFunctionCallFormat(const std::string& content, std::vector<ToolCall>& tool_calls) {
+    std::regex func_pattern(R"((\w+)\s*\(\s*([^)]+)\s*\))");
+    std::smatch match;
+    if (!std::regex_search(content, match, func_pattern)) return;
+
+    ToolCall tc;
+    tc.id = generateToolId(0);
+    tc.name = match[1].str();
+    std::string args_str = match[2].str();
+
+    if (args_str.find("{") != std::string::npos) {
+        try {
+            tc.arguments = json::parse(args_str);
+        } catch (...) {
+            tc.arguments = json{{"command", args_str}};
+        }
+    } else {
+        tc.arguments = json{{"command", args_str}};
+    }
+    tool_calls.push_back(tc);
+    Logger::instance().info("函数调用格式: name=" + tc.name);
+}
+
+} // anonymous namespace
+
+bool LLMClient::parseNonStandardToolCall(const std::string& content, std::vector<ToolCall>& tool_calls) {
+    tool_calls.clear();
+
+    // 提取 <tool_call> 和 </tool_call> 之间的内容
+    std::string inner_content = content;
+    size_t start = content.find("<tool_call>");
+    if (start != std::string::npos) {
+        size_t end = content.find("</tool_call>", start);
+        if (end != std::string::npos) {
+            inner_content = content.substr(start + 11, end - start - 11);
+            while (!inner_content.empty() && (inner_content.front() == '\n' || inner_content.front() == '\r' || inner_content.front() == ' ')) {
+                inner_content.erase(0, 1);
+            }
+            while (!inner_content.empty() && (inner_content.back() == '\n' || inner_content.back() == '\r' || inner_content.back() == ' ')) {
+                inner_content.pop_back();
+            }
+        }
+    }
+
+    // 1. 尝试解析inner_content为JSON格式
+    if (tryParseAsSingleToolCall(inner_content, tool_calls)) {
+        return true;
+    }
+
+    // 2. 尝试XML格式
+    size_t xml_count_before = tool_calls.size();
+    tryParseXmlFormat(content, tool_calls);
+    if (tool_calls.size() > xml_count_before) {
+        return true;
+    }
+
+    // 3. 尝试 {"tool_call": {...}} 格式
+    size_t tool_call_count_before = tool_calls.size();
+    tryParseToolCallJsonFormat(content, tool_calls);
+    if (tool_calls.size() > tool_call_count_before) {
+        return true;
+    }
+
+    // 4. 尝试函数调用格式: exec(pwd && ls -l)
+    size_t func_count_before = tool_calls.size();
+    tryParseFunctionCallFormat(content, tool_calls);
+    if (tool_calls.size() > func_count_before) {
+        return true;
+    }
+
+    return !tool_calls.empty();
 }
 
 bool LLMClient::chatAnthropic(const std::vector<Message>& messages,

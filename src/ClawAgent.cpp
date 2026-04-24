@@ -1,6 +1,6 @@
 #include "ClawAgent.hpp"
 #include "config/ConfigManager.hpp"
-#include "llm/LLMClient.hpp"
+#include "llm/LlmClientFactory.hpp"
 #include "message/MessageManager.hpp"
 #include "tools/ToolManager.hpp"
 #include "agent/AgentRuntime.hpp"
@@ -38,7 +38,7 @@ ClawAgentCore::ClawAgentCore(const std::string& config_path)
     Output::instance().init(output_config.color_output, output_config.show_tools);
 
     // 初始化LLM客户端
-    llm_client_ = std::make_shared<LLMClient>(
+    llm_client_ = LlmClientFactory::create(
         model_config.provider,
         model_config.name,
         model_config.api_key,

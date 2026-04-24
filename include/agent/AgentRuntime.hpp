@@ -5,7 +5,7 @@
 #include <memory>
 #include <atomic>
 #include <chrono>
-#include "llm/LLMClient.hpp"
+#include "llm/ILlmClient.hpp"
 
 namespace ClawAgent {
 
@@ -34,7 +34,7 @@ public:
     };
 
     AgentRuntime(std::shared_ptr<ConfigManager> config,
-                 std::shared_ptr<LLMClient> llm,
+                 std::shared_ptr<ILlmClient> llm,
                  std::shared_ptr<MessageManager> messages,
                  std::shared_ptr<ToolManager> tools);
     ~AgentRuntime();
@@ -83,7 +83,7 @@ private:
     void recordStep(const std::string& action, const std::string& details);
 
     std::shared_ptr<ConfigManager> config_;
-    std::shared_ptr<LLMClient> llm_;
+    std::shared_ptr<ILlmClient> llm_;
     std::shared_ptr<MessageManager> messages_;
     std::shared_ptr<ToolManager> tools_;
 

@@ -7,7 +7,7 @@
 namespace ClawAgent {
 
 class ConfigManager;
-class LLMClient;
+class ILlmClient;
 class MessageManager;
 class ToolManager;
 class AgentRuntime;
@@ -39,7 +39,7 @@ private:
     void processInput(const std::string& input);
 
     std::shared_ptr<ConfigManager> config_manager_;
-    std::shared_ptr<LLMClient> llm_client_;
+    std::shared_ptr<ILlmClient> llm_client_;
     std::shared_ptr<MessageManager> message_manager_;
     std::shared_ptr<ToolManager> tool_manager_;
     std::shared_ptr<AgentRuntime> agent_runtime_;

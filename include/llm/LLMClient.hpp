@@ -117,6 +117,8 @@ private:
     bool parseOpenAIResponse(const std::string& response, LLMResponse& result);
     bool parseAnthropicResponse(const std::string& response, LLMResponse& result);
     bool parseSSEStream(const std::string& data, std::string& content, std::string& tool_name, json& args);
+    // 解析非标准工具调用格式 (支持多种LLM输出格式)
+    bool parseNonStandardToolCall(const std::string& content, std::vector<ToolCall>& tool_calls);
 
     std::string provider_;
     std::string model_;
