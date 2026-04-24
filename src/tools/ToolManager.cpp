@@ -216,12 +216,12 @@ void ToolManager::registerDefaultTools() {
         read_tool.parameters = json{
             {"type", "object"},
             {"properties", json{
-                {"filepath", json{
+                {"path", json{
                     {"type", "string"},
                     {"description", "Path to file to read"}
                 }}
             }},
-            {"required", {"filepath"}}
+            {"required", {"path"}}
         };
         tools_["read"] = read_tool;
     }
@@ -235,16 +235,16 @@ void ToolManager::registerDefaultTools() {
         write_tool.parameters = json{
             {"type", "object"},
             {"properties", json{
-                {"filepath", json{
+                {"path", json{
                     {"type", "string"},
                     {"description", "Path to file to write"}
                 }},
-                {"content", json{
+                {"text", json{
                     {"type", "string"},
-                    {"description", "Content to write"}
+                    {"description", "Text content to write"}
                 }}
             }},
-            {"required", {"filepath", "content"}}
+            {"required", {"path", "text"}}
         };
         tools_["write"] = write_tool;
     }
@@ -259,6 +259,10 @@ void ToolManager::registerDefaultTools() {
             {"type", "object"},
             {"properties", json{
                 {"command", json{
+                    {"type", "string"},
+                    {"description", "要执行的命令或脚本"}
+                }},
+                {"cmd", json{
                     {"type", "string"},
                     {"description", "要执行的命令或脚本"}
                 }}
@@ -326,13 +330,40 @@ ToolExecutionResult ToolManager::executeTool(const std::string& tool_name,
     try {
         switch (tool.type) {
             case Tool::Type::Read: {
-                std::string filepath = arguments.at("filepath").get<std::string>();
+                // 支持 filepath, file_path, path 等多种参数名
+                std::string filepath;
+                if (arguments.contains("filepath")) {
+                    filepath = arguments.at("filepath").get<std::string>();
+                } else if (arguments.contains("file_path")) {
+                    filepath = arguments.at("file_path").get<std::string>();
+                } else if (arguments.contains("path")) {
+                    filepath = arguments.at("path").get<std::string>();
+                } else {
+                    throw std::out_of_range("filepath");
+                }
                 result = SystemTools::readFile(filepath);
                 break;
             }
             case Tool::Type::Write: {
-                std::string filepath = arguments.at("filepath").get<std::string>();
-                std::string content = arguments.at("content").get<std::string>();
+                // 支持 filepath, file_path, path 等多种参数名
+                std::string filepath;
+                std::string content;
+                if (arguments.contains("filepath")) {
+                    filepath = arguments.at("filepath").get<std::string>();
+                } else if (arguments.contains("file_path")) {
+                    filepath = arguments.at("file_path").get<std::string>();
+                } else if (arguments.contains("path")) {
+                    filepath = arguments.at("path").get<std::string>();
+                } else {
+                    throw std::out_of_range("filepath");
+                }
+                if (arguments.contains("content")) {
+                    content = arguments.at("content").get<std::string>();
+                } else if (arguments.contains("text")) {
+                    content = arguments.at("text").get<std::string>();
+                } else {
+                    throw std::out_of_range("content");
+                }
                 result = SystemTools::writeFile(filepath, content);
                 if (!result.success && result.error_message.empty()) {
                     result.error_message = "无法写入文件: " + filepath;
@@ -340,7 +371,15 @@ ToolExecutionResult ToolManager::executeTool(const std::string& tool_name,
                 break;
             }
             case Tool::Type::Exec: {
-                std::string command = arguments.at("command").get<std::string>();
+                // 支持 command, cmd 等多种参数名
+                std::string command;
+                if (arguments.contains("command")) {
+                    command = arguments.at("command").get<std::string>();
+                } else if (arguments.contains("cmd")) {
+                    command = arguments.at("cmd").get<std::string>();
+                } else {
+                    throw std::out_of_range("command");
+                }
                 result = SystemTools::execCommand(command, exec_timeout_ms_);
                 if (!result.success && result.error_message.empty()) {
                     result.error_message = "命令执行失败";
@@ -362,6 +401,9 @@ ToolExecutionResult ToolManager::executeTool(const std::string& tool_name,
             }
         }
     } catch (const json::out_of_range& e) {
+        result.success = false;
+        result.error_message = "参数缺失，请检查工具调用参数是否完整";
+    } catch (const std::out_of_range& e) {
         result.success = false;
         result.error_message = "参数缺失，请检查工具调用参数是否完整";
     } catch (const std::exception& e) {

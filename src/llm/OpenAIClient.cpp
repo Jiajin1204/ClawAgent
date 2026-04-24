@@ -197,10 +197,22 @@ bool OpenAIClient::parseResponse(const std::string& response_str, LLMResponse& r
 
             // 尝试解析非标准格式
             if (response.tool_calls.empty() && !response.content.empty()) {
-                if (response.content.find("<tool_call>") != std::string::npos ||
-                    response.content.find("{\"tool_call\"") != std::string::npos ||
-                    response.content.find("\"name\"") != std::string::npos ||
-                    response.content.find("exec(") != std::string::npos) {
+                // 去除首尾空白后检查
+                std::string trimmed = response.content;
+                while (!trimmed.empty() && (trimmed.front() == ' ' || trimmed.front() == '\t' || trimmed.front() == '\n' || trimmed.front() == '\r')) {
+                    trimmed.erase(trimmed.begin());
+                }
+                while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t' || trimmed.back() == '\n' || trimmed.back() == '\r')) {
+                    trimmed.pop_back();
+                }
+
+                // 检查是否是 JSON 数组格式
+                if ((trimmed.front() == '[' && trimmed.back() == ']') ||
+                    trimmed.find("[{\"type\"") != std::string::npos ||
+                    trimmed.find("exec pwd") != std::string::npos ||
+                    trimmed.find("exec(") != std::string::npos ||
+                    trimmed.find("<tool_call>") != std::string::npos ||
+                    trimmed.find("{\"tool_call\"") != std::string::npos) {
                     if (parseNonStandardToolCall(response.content, response.tool_calls)) {
                         Logger::instance().info("检测到非标准工具调用格式");
                     }
@@ -261,17 +273,43 @@ bool extractToolFromJsonObject(const json& j, ToolCall& tc, size_t index) {
 bool tryParseAsSingleToolCall(const std::string& content, std::vector<ToolCall>& tool_calls) {
     try {
         json j = json::parse(content);
-        if (!j.is_object()) return false;
-
-        ToolCall tc;
-        if (extractToolFromJsonObject(j, tc, tool_calls.size())) {
-            tool_calls.push_back(tc);
-            Logger::instance().info("JSON单工具格式: name=" + tc.name);
-            return true;
+        if (j.is_object()) {
+            ToolCall tc;
+            if (extractToolFromJsonObject(j, tc, tool_calls.size())) {
+                tool_calls.push_back(tc);
+                Logger::instance().info("JSON单工具格式: name=" + tc.name);
+                return true;
+            }
+            // 提取失败后，不再继续遍历键（避免把 "tool_call" 这样的键名当作工具名）
+            return false;
         }
-
-        // 提取失败后，不再继续遍历键（避免把 "tool_call" 这样的键名当作工具名）
-        return false;
+        if (j.is_array()) {
+            // 支持 JSON 数组格式: [{"type": "function", "function": {"name": "exec", "arguments": {...}}}]
+            for (size_t i = 0; i < j.size(); ++i) {
+                const json& item = j[i];
+                if (item.is_object() && item.contains("type") && item["type"] == "function") {
+                    if (item.contains("function") && item["function"].is_object()) {
+                        const json& func = item["function"];
+                        ToolCall tc;
+                        tc.id = generateToolId(tool_calls.size());
+                        tc.name = func.value("name", "");
+                        auto args_val = func.value("arguments", json::object());
+                        if (args_val.is_string()) {
+                            tc.arguments = json::parse(args_val.get<std::string>());
+                        } else {
+                            tc.arguments = args_val;
+                        }
+                        if (!tc.name.empty()) {
+                            tool_calls.push_back(tc);
+                            Logger::instance().info("JSON数组工具格式: name=" + tc.name);
+                        }
+                    }
+                }
+            }
+            if (!tool_calls.empty()) {
+                return true;
+            }
+        }
     } catch (...) {}
     return false;
 }
@@ -387,6 +425,57 @@ void tryParseFunctionCallFormat(const std::string& content, std::vector<ToolCall
 
 bool OpenAIClient::parseNonStandardToolCall(const std::string& content, std::vector<ToolCall>& tool_calls) {
     tool_calls.clear();
+
+    // 处理纯文本格式: "exec pwd" 或 "read file.txt"
+    {
+        std::regex simple_pattern(R"(^(\w+)\s+([^\s].*)?$)");
+        std::smatch match;
+        if (std::regex_match(content, match, simple_pattern)) {
+            std::string tool_name = match[1].str();
+            std::string args = match.size() > 2 ? match[2].str() : "";
+            // 去除首尾空白
+            while (!args.empty() && (args.front() == ' ' || args.front() == '\t')) args.erase(args.begin());
+            while (!args.empty() && (args.back() == ' ' || args.back() == '\t')) args.pop_back();
+
+            // 判断是工具名还是命令
+            if (tool_name == "exec" || tool_name == "read" || tool_name == "write") {
+                ToolCall tc;
+                tc.id = generateToolId(0);
+                tc.name = tool_name;
+                if (tool_name == "exec") {
+                    tc.arguments = json{{"command", args}};
+                } else if (tool_name == "read") {
+                    tc.arguments = json{{"path", args}};
+                } else if (tool_name == "write") {
+                    // write 需要两个参数，这里只处理简单情况
+                    tc.arguments = json{{"path", args}};
+                }
+                tool_calls.push_back(tc);
+                Logger::instance().info("纯文本工具格式: name=" + tool_name);
+                return true;
+            }
+        }
+    }
+
+    // 尝试解析 call:default_api:exec{"command": "pwd"} 格式
+    {
+        std::regex call_pattern(R"(call:default_api:(\w+)\{([^}]+)\})");
+        std::smatch match;
+        if (std::regex_search(content, match, call_pattern)) {
+            ToolCall tc;
+            tc.id = generateToolId(0);
+            tc.name = match[1].str();
+            std::string args_str = "{" + match[2].str() + "}";
+            try {
+                tc.arguments = json::parse(args_str);
+            } catch (...) {
+                tc.arguments = json{{"command", match[2].str()}};
+            }
+            tool_calls.push_back(tc);
+            Logger::instance().info("call:default_api 格式: name=" + tc.name);
+            return true;
+        }
+    }
 
     // 提取 <tool_call> 和 </tool_call> 之间的内容
     std::string inner_content = content;
