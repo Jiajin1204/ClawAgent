@@ -2,7 +2,7 @@
     "model": {
         "provider": "anthropic",
         "name": "MiniMax-M2.7",
-        "api_key": "sk-cp-hiIQTJiJFHwXtMBSpbCgh2HM8JeobrhEtEUueXXur9nUXXBPPYGLof8Svoczg5J7FFHsnIXXfXDt2eiiG-m7XMpNEkhGpPxDbg7n55r6trZ4FUR4Z6FkX5w",
+        "api_key": "sk-xxxxxxxxxx",
         "base_url": "https://api.minimaxi.com/anthropic/v1",
         "stream": true,
         "timeout_ms": 120000

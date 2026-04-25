@@ -22,6 +22,7 @@ AgentRuntime::AgentRuntime(std::shared_ptr<ConfigManager> config,
     , llm_(llm)
     , messages_(messages)
     , tools_(tools)
+    , output_callback_(&Output::instance())
     , running_(false)
     , stop_requested_(false) {
 
@@ -31,13 +32,13 @@ AgentRuntime::AgentRuntime(std::shared_ptr<ConfigManager> config,
     stats_.total_tokens_used = 0;
     stats_.total_time_ms = 0;
     stats_.stopped = false;
-
-    // 初始化输出管理器
-    auto output_config = config_->getOutputConfig();
-    Output::instance().init(output_config.color_output, output_config.show_tools);
 }
 
 AgentRuntime::~AgentRuntime() = default;
+
+void AgentRuntime::setOutputCallback(IOutputCallback* callback) {
+    output_callback_ = callback ? callback : &Output::instance();
+}
 
 std::string AgentRuntime::getDynamicContext() const {
     std::stringstream ss;
@@ -102,12 +103,13 @@ bool AgentRuntime::run(const std::string& user_input, std::string& final_respons
     return success;
 }
 
-bool AgentRuntime::step(const std::string& user_input, std::string& response) {
+bool AgentRuntime::step(const std::string& /*user_input*/, std::string& response) {
     auto agent_config = config_->getAgentConfig();
 
     // 检查停止条件
     if (shouldStop()) {
         response = "Agent已停止: " + stats_.stop_reason;
+        output_callback_->onError(response);
         return false;
     }
 
@@ -130,20 +132,30 @@ bool AgentRuntime::step(const std::string& user_input, std::string& response) {
     // 调用LLM
     LLMResponse llm_response;
 
-    Output::instance().printCallingModel();
+    output_callback_->onLlmCalling();
 
-    // 非流式模式 (接口暂不支持流式回调)
+    // 计时开始
+    auto llm_start = std::chrono::high_resolution_clock::now();
+
+    // 非流式模式
     if (!llm_->chat(all_messages, tool_defs, llm_response)) {
         response = "LLM调用失败: " + llm_response.content;
+        output_callback_->onError(response);
         return false;
     }
+
+    // 计时结束
+    auto llm_end = std::chrono::high_resolution_clock::now();
+    auto llm_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(llm_end - llm_start).count();
+    stats_.total_tokens_used += llm_time_ms;
+    output_callback_->onLlmResponse(llm_time_ms);
 
     stats_.iterations++;
 
     // 处理响应
     if (!llm_response.tool_calls.empty()) {
         // 有工具调用
-        Output::instance().printToolCalls(llm_response.tool_calls.size());
+        output_callback_->onToolCallsFound(llm_response.tool_calls.size());
 
         stats_.total_tool_calls += llm_response.tool_calls.size();
 
@@ -167,20 +179,15 @@ bool AgentRuntime::step(const std::string& user_input, std::string& response) {
 
         // 逐个执行工具并添加工具结果消息
         for (const auto& call : llm_response.tool_calls) {
-            Output::instance().printExecutingTool(call.name);
-            if (!call.arguments.empty()) {
-                Output::instance().printToolParams(call.arguments.dump());
-            }
+            output_callback_->onToolExecuting(call.name, call.arguments);
 
             auto result = tools_->executeTool(call.name, call.arguments, call.id);
 
             if (result.success) {
-                bool truncated = result.result.length() > 200;
-                Output::instance().printToolResult(result.result.substr(0, 200), truncated);
+                output_callback_->onToolResult(call.name, result.result, result.execution_time_ms, true);
             } else {
-                Output::instance().printToolError(result.error_message);
+                output_callback_->onToolResult(call.name, result.error_message, result.execution_time_ms, false);
             }
-            Output::instance().printToolTime(result.execution_time_ms);
 
             // 添加工具结果消息（每个工具调用单独一条消息）
             ChatMessage tool_msg;
@@ -198,6 +205,7 @@ bool AgentRuntime::step(const std::string& user_input, std::string& response) {
         // 最终响应
         response = llm_response.content;
         messages_->addMessage("assistant", llm_response.content);
+        output_callback_->onAssistantMessage(response);
         return true;
     }
 }
@@ -244,63 +252,9 @@ AgentRuntime::RuntimeStats AgentRuntime::getStats() const {
     return stats_;
 }
 
-void AgentRuntime::recordStep(const std::string& action, const std::string& details) {
+void AgentRuntime::recordStep(const std::string& action, const std::string& /*details*/) {
     recent_actions_.push_back(action);
     if (recent_actions_.size() > MAX_RECENT_ACTIONS) {
         recent_actions_.erase(recent_actions_.begin());
     }
-}
-
-void AgentRuntime::runLoop() {
-    // 交互式循环（保留用于未来扩展）
-    running_ = true;
-}
-
-// ============ StopDetector Implementation ============
-
-StopDetector::StopDetector(int max_iterations, int max_repeated_actions)
-    : max_iterations_(max_iterations)
-    , max_repeated_actions_(max_repeated_actions)
-    , current_iteration_(0) {
-}
-
-void StopDetector::recordAction(const std::string& action) {
-    action_history_.push_back(action);
-    current_iteration_++;
-}
-
-bool StopDetector::shouldStop() const {
-    if (current_iteration_ >= max_iterations_) {
-        stop_reason_ = "达到最大迭代次数";
-        return true;
-    }
-
-    // 检测重复动作
-    if (action_history_.size() >= static_cast<size_t>(max_repeated_actions_)) {
-        size_t count = 1;
-        const auto& last = action_history_.back();
-        for (size_t i = action_history_.size() - 2; i != static_cast<size_t>(-1); --i) {
-            if (action_history_[i] == last) {
-                count++;
-            } else {
-                break;
-            }
-        }
-        if (count >= max_repeated_actions_) {
-            stop_reason_ = "检测到重复动作: " + last;
-            return true;
-        }
-    }
-
-    return false;
-}
-
-std::string StopDetector::getStopReason() const {
-    return stop_reason_;
-}
-
-void StopDetector::reset() {
-    action_history_.clear();
-    current_iteration_ = 0;
-    stop_reason_.clear();
 }

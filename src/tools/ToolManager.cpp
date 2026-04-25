@@ -449,7 +449,7 @@ std::string ToolManager::getToolDescription(const std::string& name) const {
     return "";
 }
 
-std::string Tool::execute(const json& arguments) const {
+std::string Tool::execute(const json& /*arguments*/) const {
     // 默认执行，由ToolManager调用具体实现
     return "";
 }

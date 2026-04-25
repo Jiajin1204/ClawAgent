@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include "llm/ILlmClient.hpp"
+#include "utils/OutputCallback.hpp"
 
 namespace ClawAgent {
 
@@ -16,11 +17,10 @@ class ToolManager;
 /**
  * @brief Agent运行时 - 核心智能体循环
  *
- * 功能：
- * 1. 构建提示词（固定+动态部分）
- * 2. 运行智能体循环
- * 3. 处理工具调用
- * 4. 停止机制
+ * 设计原则：
+ * 1. 非阻塞：run() 处理一次交互即返回
+ * 2. 输出回调：所有输出通过 IOutputCallback，不直接打印
+ * 3. 循环由外部控制：AgentRuntime 不管理主循环
  */
 class AgentRuntime {
 public:
@@ -43,11 +43,15 @@ public:
     AgentRuntime(const AgentRuntime&) = delete;
     AgentRuntime& operator=(const AgentRuntime&) = delete;
 
+    // ============ 回调设置 ============
+
+    // 设置输出回调
+    void setOutputCallback(IOutputCallback* callback);
+
+    // ============ 核心 API ============
+
     // 运行一次交互（用户输入 -> LLM响应 -> 工具调用 -> 响应）
     bool run(const std::string& user_input, std::string& final_response);
-
-    // 运行交互式循环（持续直到停止）
-    void runLoop();
 
     // 停止运行
     void stop();
@@ -68,14 +72,6 @@ private:
     // 单步执行
     bool step(const std::string& user_input, std::string& response);
 
-    // 处理LLM响应（可能是内容或工具调用）
-    bool processResponse(const std::string& llm_content,
-                         const std::vector<ToolCall>& tool_calls,
-                         std::string& response);
-
-    // 执行工具并格式化结果
-    std::string executeToolsFormatted(const std::vector<ToolCall>& tool_calls);
-
     // 检查停止条件
     bool shouldStop();
 
@@ -87,6 +83,9 @@ private:
     std::shared_ptr<MessageManager> messages_;
     std::shared_ptr<ToolManager> tools_;
 
+    // 输出回调（默认为 Output::instance()）
+    IOutputCallback* output_callback_;
+
     std::atomic<bool> running_;
     std::atomic<bool> stop_requested_;
     RuntimeStats stats_;
@@ -94,33 +93,6 @@ private:
     // 循环检测
     std::vector<std::string> recent_actions_;
     static constexpr int MAX_RECENT_ACTIONS = 10;
-};
-
-/**
- * @brief 停止检测器 - 防止无限循环
- */
-class StopDetector {
-public:
-    StopDetector(int max_iterations = 50, int max_repeated_actions = 5);
-
-    // 记录动作
-    void recordAction(const std::string& action);
-
-    // 检查是否应该停止
-    bool shouldStop() const;
-
-    // 获取停止原因
-    std::string getStopReason() const;
-
-    // 重置
-    void reset();
-
-private:
-    int max_iterations_;
-    int max_repeated_actions_;
-    int current_iteration_;
-    std::vector<std::string> action_history_;
-    mutable std::string stop_reason_;
 };
 
 } // namespace ClawAgent

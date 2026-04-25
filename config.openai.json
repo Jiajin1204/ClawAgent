@@ -2,7 +2,7 @@
     "model": {
         "provider": "openai",
         "name": "qwen3.6-plus-cc",
-        "api_key": "sk-ihSucsGRjJIlJmKIGI2FvUXQPbMdi4YKIGdkwIYG3gEL9OBs",
+        "api_key": "sk-xxxxxxxxxx",
         "base_url": "https://www.dmxapi.cn/v1",
         "stream": true,
         "timeout_ms": 120000

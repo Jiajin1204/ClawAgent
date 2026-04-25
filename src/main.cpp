@@ -22,6 +22,9 @@ void signalHandler(int signal) {
             exit(1);
         }
         std::cout << "\n按 Ctrl+C 再次退出，或输入 /quit 退出" << std::endl;
+        if (g_agent) {
+            g_agent->stop();
+        }
     }
 }
 
@@ -60,8 +63,25 @@ int main(int argc, char* argv[]) {
 
         printBanner();
 
-        // 运行Agent
-        g_agent->run();
+        // 非阻塞循环
+        std::string input;
+        while (g_agent->isRunning()) {
+            std::cout << "[you] ";
+            if (!std::getline(std::cin, input)) {
+                break;
+            }
+            // 去除空白
+            input.erase(0, input.find_first_not_of(" \t\n\r"));
+            if (input.empty()) {
+                continue;
+            }
+
+            std::cout << std::endl;  // 换行分隔输入
+
+            // 处理输入
+            std::string response;
+            g_agent->process(input, response);
+        }
 
     } catch (const std::exception& e) {
         std::cerr << "错误: " << e.what() << std::endl;

@@ -17,7 +17,10 @@
 using namespace ClawAgent;
 
 ClawAgentCore::ClawAgentCore(const std::string& config_path)
-    : running_(true), streaming_enabled_(true) {
+    : running_(true)
+    , streaming_enabled_(true)
+    , output_callback_(&Output::instance())
+    , owns_output_callback_(false) {
 
     initialize();
 
@@ -33,7 +36,7 @@ ClawAgentCore::ClawAgentCore(const std::string& config_path)
 
     streaming_enabled_ = model_config.stream;
 
-    // 初始化输出管理器（需要在其他组件之前，以便早期输出）
+    // 初始化输出管理器
     auto output_config = config_manager_->getOutputConfig();
     Output::instance().init(output_config.color_output, output_config.show_tools);
 
@@ -70,13 +73,19 @@ ClawAgentCore::ClawAgentCore(const std::string& config_path)
         tool_manager_
     );
 
+    // 设置输出回调到 AgentRuntime
+    agent_runtime_->setOutputCallback(output_callback_);
+
     Logger::instance().info("ClawAgent 初始化完成");
-    Output::instance().printSystem("已连接到: " + model_config.name
+    output_callback_->onAssistantMessage("已连接到: " + model_config.name
         + " (" + model_config.provider + ")");
 }
 
 ClawAgentCore::~ClawAgentCore() {
     running_ = false;
+    if (owns_output_callback_) {
+        delete output_callback_;
+    }
 }
 
 void ClawAgentCore::initialize() {
@@ -84,94 +93,112 @@ void ClawAgentCore::initialize() {
     logger_ = &Logger::instance();
 }
 
-void ClawAgentCore::run() {
-    std::string input;
-
-    while (running_) {
-        // 显示提示符
-        Output::instance().printPrompt("[ClawAgent]");
-
-        // 使用标准输入读取
-        if (!std::getline(std::cin, input)) {
-            // EOF (Ctrl+D)
-            std::cout << "\n再见!" << std::endl;
-            break;
-        }
-
-        // 去除空白
-        input.erase(0, input.find_first_not_of(" \t\n\r"));
-        input.erase(input.find_last_not_of(" \t\n\r") + 1);
-
-        if (input.empty()) {
-            continue;
-        }
-
-        // 检查命令
-        if (input[0] == '/') {
-            handleCommand(input);
-        } else {
-            processInput(input);
-        }
-    }
+void ClawAgentCore::setOutputCallback(IOutputCallback* callback) {
+    output_callback_ = callback ? callback : &Output::instance();
+    agent_runtime_->setOutputCallback(output_callback_);
 }
 
-void ClawAgentCore::handleCommand(const std::string& cmd) {
+IOutputCallback* ClawAgentCore::getOutputCallback() {
+    return output_callback_;
+}
+
+bool ClawAgentCore::process(const std::string& user_input, std::string& final_response) {
+    if (!running_) {
+        final_response = "Agent已停止";
+        return false;
+    }
+
+    // 检查是否命令
+    if (!user_input.empty() && user_input[0] == '/') {
+        return handleCommand(user_input);
+    }
+
+    // 处理输入
+    std::string response;
+    bool success = agent_runtime_->run(user_input, response);
+
+    if (success) {
+        final_response = response;
+    } else {
+        final_response = response;  // 错误信息也在 response 中
+    }
+
+    return success;
+}
+
+bool ClawAgentCore::handleCommand(const std::string& cmd) {
     std::istringstream iss(cmd);
     std::string command;
     iss >> command;
 
     if (command == "/help" || command == "/h") {
         printHelp();
+        return true;
     } else if (command == "/new" || command == "/n") {
         newSession();
+        return true;
     } else if (command == "/quit" || command == "/q" || command == "/exit") {
-        quit();
+        stop();
+        return true;
     } else if (command == "/clear" || command == "/c") {
         message_manager_->clearHistory();
-        Output::instance().printSystem("历史记录已清除");
+        output_callback_->onAssistantMessage("历史记录已清除");
+        return true;
     } else if (command == "/history" || command == "/hist") {
         auto history = message_manager_->getHistory();
-        Output::instance().printSystem("\n=== 消息历史 (" + std::to_string(history.size()) + " 条) ===");
+        std::stringstream ss;
+        ss << "\n=== 消息历史 (" << history.size() << " 条) ===";
         for (const auto& msg : history) {
-            Output::instance().printSystem("[" + msg.role + "] " + msg.content);
+            ss << "\n[" << msg.role << "] " << msg.content;
         }
+        output_callback_->onAssistantMessage(ss.str());
+        return true;
     } else if (command == "/tools" || command == "/t") {
         auto tools = tool_manager_->getToolDefinitions();
-        Output::instance().printSystem("\n=== 可用工具 ===");
+        std::stringstream ss;
+        ss << "\n=== 可用工具 ===";
         for (const auto& tool : tools) {
-            Output::instance().printSystem("- " + tool["name"].get<std::string>() + ": "
-                + tool["description"].get<std::string>());
+            ss << "\n- " << tool["name"].get<std::string>() << ": "
+               << tool["description"].get<std::string>();
         }
+        output_callback_->onAssistantMessage(ss.str());
+        return true;
     } else if (command == "/stats") {
         auto stats = agent_runtime_->getStats();
-        Output::instance().printSystem("\n=== 运行统计 ===");
-        Output::instance().printSystem("迭代次数: " + std::to_string(stats.iterations));
-        Output::instance().printSystem("工具调用: " + std::to_string(stats.total_tool_calls));
-        Output::instance().printSystem("总耗时: " + std::to_string(stats.total_time_ms) + "ms");
-        Output::instance().printSystem("状态: " + std::string(stats.stopped ? "已停止" : "运行中"));
+        std::stringstream ss;
+        ss << "\n=== 运行统计 ===";
+        ss << "\n迭代次数: " << stats.iterations;
+        ss << "\n工具调用: " << stats.total_tool_calls;
+        ss << "\n总耗时: " << stats.total_time_ms << "ms";
+        ss << "\n状态: " << (stats.stopped ? "已停止" : "运行中");
         if (!stats.stop_reason.empty()) {
-            Output::instance().printSystem("停止原因: " + stats.stop_reason);
+            ss << "\n停止原因: " << stats.stop_reason;
         }
+        output_callback_->onAssistantMessage(ss.str());
+        return true;
     } else if (command == "/save") {
         if (message_manager_->saveToFile()) {
-            Output::instance().printSystem("消息历史已保存");
+            output_callback_->onAssistantMessage("消息历史已保存");
         } else {
-            Output::instance().printSystem("保存失败");
+            output_callback_->onError("保存失败");
         }
+        return true;
     } else if (command == "/load") {
         if (message_manager_->loadFromFile()) {
-            Output::instance().printSystem("消息历史已加载");
+            output_callback_->onAssistantMessage("消息历史已加载");
         } else {
-            Output::instance().printSystem("加载失败");
+            output_callback_->onError("加载失败");
         }
+        return true;
     } else {
-        Output::instance().printSystem("未知命令: " + command);
-        Output::instance().printSystem("输入 /help 查看可用命令");
+        output_callback_->onError("未知命令: " + command);
+        output_callback_->onAssistantMessage("输入 /help 查看可用命令");
+        return false;
     }
 }
 
-void ClawAgentCore::printHelp() {
-    Output::instance().printSystem(R"(
+std::string ClawAgentCore::getHelpText() const {
+    return R"(
 === ClawAgent 帮助 ===
 
 命令:
@@ -188,31 +215,46 @@ void ClawAgentCore::printHelp() {
 使用说明:
   - 直接输入问题与智能体对话
   - 智能体可以调用工具完成任务
-  - 按两次Ctrl+C可强制退出
-)");
+)";
+}
+
+void ClawAgentCore::printHelp() {
+    output_callback_->onAssistantMessage(getHelpText());
+}
+
+void ClawAgentCore::printSystem(const std::string& message) {
+    output_callback_->onAssistantMessage(message);
 }
 
 void ClawAgentCore::newSession() {
     message_manager_->newSession();
-    Output::instance().printSystem("新会话已创建，短期记忆已清除");
+    output_callback_->onAssistantMessage("新会话已创建，短期记忆已清除");
 }
 
-void ClawAgentCore::quit() {
-    // 保存历史
+void ClawAgentCore::clearHistory() {
+    message_manager_->clearHistory();
+}
+
+void ClawAgentCore::stop() {
     message_manager_->saveToFile();
     running_ = false;
-    Output::instance().printSystem("再见!");
+    output_callback_->onAssistantMessage("再见!");
 }
 
-void ClawAgentCore::processInput(const std::string& input) {
-    Output::instance().printProcessing();
+bool ClawAgentCore::isRunning() const {
+    return running_;
+}
 
-    std::string response;
-    bool success = agent_runtime_->run(input, response);
+AgentRuntime::RuntimeStats ClawAgentCore::getStats() const {
+    return agent_runtime_->getStats();
+}
 
-    if (success) {
-        Output::instance().printAssistant(response);
-    } else {
-        Output::instance().printError(response);
+std::vector<ChatMessage> ClawAgentCore::getHistory() const {
+    return message_manager_->getHistory();
+}
+
+void ClawAgentCore::ensureOutputCallback() {
+    if (!output_callback_) {
+        output_callback_ = &Output::instance();
     }
 }

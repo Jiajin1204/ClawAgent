@@ -264,7 +264,93 @@ if (n > 0) {
 - `src/llm/LlmClientFactory.cpp` - 新增
 - `src/llm/OpenAIClient.cpp` - 新增
 - `src/llm/AnthropicClient.cpp` - 新增
-- `src/llm/LLMClient.cpp.bak` - 备份旧代码（待删除）
+- `src/llm/LLMClient.cpp.bak` - 备份旧代码（已删除）
+
+---
+
+## 2026-04-25
+
+### 库化重构 - 输出回调接口
+
+**目标**: 将 ClawAgent 作为库集成到其他工程
+
+**问题**:
+- `g_agent->run()` 在 main.cpp 中阻塞，不适合集成
+- 输出直接打印到终端，无法自定义
+
+**解决方案**:
+1. 新增 `IOutputCallback` 接口，所有输出通过回调通知
+2. `ClawAgentCore::process()` 非阻塞，每次调用返回最终响应
+3. 默认使用 `Output` 类作为回调，保持现有行为
+
+**新增文件**:
+- `include/utils/OutputCallback.hpp` - 输出回调接口
+
+**修改文件**:
+- `include/ClawAgent.hpp` - 添加 setOutputCallback、process 等方法
+- `src/ClawAgent.cpp` - 移除阻塞循环，使用回调输出
+- `include/utils/Output.hpp` / `src/utils/Output.cpp` - 实现 IOutputCallback
+- `include/agent/AgentRuntime.hpp` / `src/agent/AgentRuntime.cpp` - 使用回调
+- `src/main.cpp` - 非阻塞循环
+
+**API 变更**:
+- 移除 `ClawAgentCore::run()` 阻塞方法
+- 新增 `ClawAgentCore::process(input, response)` 非阻塞方法
+- 新增 `ClawAgentCore::setOutputCallback(callback)` 设置自定义回调
+
+**使用示例**:
+```cpp
+// 其他项目集成
+ClawAgentCore agent("config.json");
+agent.setOutputCallback(myCallback);  // 自定义输出
+
+std::string response;
+agent.process("execute pwd", response);
+// 响应通过 myCallback 的 onAssistantMessage 返回
+```
+
+---
+
+**开发人员**: Claude Code
+**项目状态**: 开发中
+**版本**: 1.0.0
+
+---
+
+## 2026-04-26
+
+### 交互优化 - [you] 提示符
+
+**问题**: 用户在终端执行 `./build/linux/clawagent` 时，不知道何时可以输入
+
+**修复**: 在 main.cpp 的交互循环中添加 `[you]` 提示符
+
+```cpp
+while (g_agent->isRunning()) {
+    std::cout << "[you] ";
+    if (!std::getline(std::cin, input)) {
+        break;
+    }
+    // ...
+}
+```
+
+**效果**:
+```
+[you] 执行pwd
+[调用模型...]
+  [LLM耗时: 1039ms]
+[检测到 1 个工具调用]
+[执行工具: exec]
+  参数: {"command":"pwd"}
+  结果: /home/jason/projects/ClawAgent
+  耗时: 10ms
+[调用模型...]
+  [LLM耗时: 1388ms]
+[ClawAgent] 当前工作目录是 `/home/jason/projects/ClawAgent`。
+
+[you]
+```
 
 ---
 

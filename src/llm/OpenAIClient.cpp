@@ -267,6 +267,29 @@ bool extractToolFromJsonObject(const json& j, ToolCall& tc, size_t index) {
             return true;
         }
     }
+    // 支持 {"tool_name": {...}} 格式（工具名作为键，参数作为值）
+    if (j.is_object()) {
+        for (auto& [key, value] : j.items()) {
+            // 跳过常见的元数据键
+            if (key == "type" || key == "name" || key == "tool" || key == "function") {
+                continue;
+            }
+            // 如果值是对象且包含参数，或者值本身就是参数
+            if (value.is_object() && (value.contains("command") || value.contains("path") || value.contains("filepath"))) {
+                tc.id = generateToolId(index);
+                tc.name = key;
+                tc.arguments = value;
+                return true;
+            }
+            // 如果值是字符串，直接作为参数
+            if (value.is_string()) {
+                tc.id = generateToolId(index);
+                tc.name = key;
+                tc.arguments = json{{"command", value.get<std::string>()}};
+                return true;
+            }
+        }
+    }
     return false;
 }
 
