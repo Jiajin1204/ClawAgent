@@ -105,6 +105,14 @@ bool AgentRuntime::run(const std::string& user_input, std::string& final_respons
 
 bool AgentRuntime::step(const std::string& /*user_input*/, std::string& response) {
     Logger::instance().info("STEP START");
+
+    // 检查停止条件
+    if (shouldStop()) {
+        response = "Agent已停止: " + stats_.stop_reason;
+        output_callback_->onError(response);
+        return false;
+    }
+
     try {
         auto agent_config = config_->getAgentConfig();
 
