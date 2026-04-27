@@ -93,7 +93,7 @@ export ANDROID_NDK_HOME=/path/to/android-ndk
 项目提供三个配置文件模板：
 
 - `config.json` - 默认配置（使用 qwen-plus）
-- `config.openai.json` - OpenAI 兼容接口配置（qwen3.6-plus-cc，支持非标准工具调用格式）
+- `config.openai.json` - OpenAI 兼容接口配置（qwen3.6-plus-cc）
 - `config.anthropic.json` - Anthropic 兼容接口配置（MiniMax-M2.7）
 
 **注意**: 请勿将包含真实 API Key 的配置文件提交到仓库！
@@ -103,7 +103,7 @@ export ANDROID_NDK_HOME=/path/to/android-ndk
 | 配置文件 | 模型 | 提供商 | 工具调用格式 |
 |----------|------|--------|--------------|
 | `config.json` | qwen-plus | OpenAI | 标准格式 |
-| `config.openai.json` | qwen3.6-plus-cc | OpenAI | 非标准格式（自动解析） |
+| `config.openai.json` | qwen3.6-plus-cc | OpenAI | 标准格式 |
 | `config.anthropic.json` | MiniMax-M2.7 | Anthropic | 标准格式 |
 
 ```bash

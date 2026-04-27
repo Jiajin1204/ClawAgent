@@ -56,8 +56,8 @@ std::string AgentRuntime::getDynamicContext() const {
     ss << "可用工具:\n";
     auto tool_defs = tools_->getToolDefinitions();
     for (const auto& tool : tool_defs) {
-        ss << "  - " << tool["name"].get<std::string>() << ": "
-           << tool["description"].get<std::string>() << "\n";
+        ss << "  - " << tool["function"].value("name", "unknown") << ": "
+           << tool["function"].value("description", "") << "\n";
     }
 
     return ss.str();
@@ -104,109 +104,116 @@ bool AgentRuntime::run(const std::string& user_input, std::string& final_respons
 }
 
 bool AgentRuntime::step(const std::string& /*user_input*/, std::string& response) {
-    auto agent_config = config_->getAgentConfig();
+    Logger::instance().info("STEP START");
+    try {
+        auto agent_config = config_->getAgentConfig();
 
-    // 检查停止条件
-    if (shouldStop()) {
-        response = "Agent已停止: " + stats_.stop_reason;
-        output_callback_->onError(response);
-        return false;
-    }
+        // 构建消息列表
+        std::vector<Message> all_messages;
 
-    // 构建消息列表
-    std::vector<Message> all_messages;
+        // 系统提示
+        Message system_msg;
+        system_msg.role = "system";
+        system_msg.content = buildSystemPrompt();
+        all_messages.push_back(system_msg);
 
-    // 系统提示
-    Message system_msg;
-    system_msg.role = "system";
-    system_msg.content = buildSystemPrompt();
-    all_messages.push_back(system_msg);
+        // 历史消息
+        auto history = messages_->getMessagesForLLM();
+        all_messages.insert(all_messages.end(), history.begin(), history.end());
 
-    // 历史消息
-    auto history = messages_->getMessagesForLLM();
-    all_messages.insert(all_messages.end(), history.begin(), history.end());
+        // 获取工具定义
+        auto tool_defs = tools_->getToolDefinitions();
 
-    // 获取工具定义
-    auto tool_defs = tools_->getToolDefinitions();
+        // 调用LLM
+        LLMResponse llm_response;
 
-    // 调用LLM
-    LLMResponse llm_response;
+        Logger::instance().info("准备调用llm_->chat, messages=" + std::to_string(all_messages.size()) + ", tools=" + std::to_string(tool_defs.size()));
 
-    output_callback_->onLlmCalling();
+        output_callback_->onLlmCalling();
 
-    // 计时开始
-    auto llm_start = std::chrono::high_resolution_clock::now();
+        // 计时开始
+        auto llm_start = std::chrono::high_resolution_clock::now();
 
-    // 非流式模式
-    if (!llm_->chat(all_messages, tool_defs, llm_response)) {
-        response = "LLM调用失败: " + llm_response.content;
-        output_callback_->onError(response);
-        return false;
-    }
+        // 非流式模式
+        if (!llm_->chat(all_messages, tool_defs, llm_response)) {
+            response = "LLM调用失败: " + llm_response.content;
+            output_callback_->onError(response);
+            return false;
+        }
 
-    // 计时结束
-    auto llm_end = std::chrono::high_resolution_clock::now();
-    auto llm_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(llm_end - llm_start).count();
-    stats_.total_tokens_used += llm_time_ms;
-    output_callback_->onLlmResponse(llm_time_ms);
+        // 计时结束
+        auto llm_end = std::chrono::high_resolution_clock::now();
+        auto llm_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(llm_end - llm_start).count();
+        stats_.total_tokens_used += llm_time_ms;
+        output_callback_->onLlmResponse(llm_time_ms);
 
-    stats_.iterations++;
+        stats_.iterations++;
 
-    // 处理响应
-    if (!llm_response.tool_calls.empty()) {
-        // 有工具调用
-        output_callback_->onToolCallsFound(llm_response.tool_calls.size());
+        // 处理响应
+        if (!llm_response.tool_calls.empty()) {
+            // 有工具调用
+            output_callback_->onToolCallsFound(llm_response.tool_calls.size());
 
-        stats_.total_tool_calls += llm_response.tool_calls.size();
+            stats_.total_tool_calls += llm_response.tool_calls.size();
 
-        // 添加助手消息（包含tool_use块）
-        {
-            ChatMessage assistant_msg;
-            assistant_msg.role = "assistant";
-            assistant_msg.content = llm_response.content;
-            if (!llm_response.tool_calls.empty()) {
-                for (const auto& tc : llm_response.tool_calls) {
-                    assistant_msg.content_blocks.push_back(json{
-                        {"type", "tool_use"},
-                        {"id", tc.id},
-                        {"name", tc.name},
-                        {"input", tc.arguments}
-                    });
+            // 添加助手消息（包含tool_use块）
+            {
+                ChatMessage assistant_msg;
+                assistant_msg.role = "assistant";
+                assistant_msg.content = llm_response.content;
+                if (!llm_response.tool_calls.empty()) {
+                    for (const auto& tc : llm_response.tool_calls) {
+                        assistant_msg.content_blocks.push_back(json{
+                            {"type", "tool_use"},
+                            {"id", tc.id},
+                            {"name", tc.name},
+                            {"input", tc.arguments}
+                        });
+                    }
                 }
-            }
-            messages_->addMessage(assistant_msg);
-        }
-
-        // 逐个执行工具并添加工具结果消息
-        for (const auto& call : llm_response.tool_calls) {
-            output_callback_->onToolExecuting(call.name, call.arguments);
-
-            auto result = tools_->executeTool(call.name, call.arguments, call.id);
-
-            if (result.success) {
-                output_callback_->onToolResult(call.name, result.result, result.execution_time_ms, true);
-            } else {
-                output_callback_->onToolResult(call.name, result.error_message, result.execution_time_ms, false);
+                messages_->addMessage(assistant_msg);
             }
 
-            // 添加工具结果消息（每个工具调用单独一条消息）
-            ChatMessage tool_msg;
-            tool_msg.role = "tool";
-            tool_msg.tool_call_id = call.id;
-            // 即使失败也添加结果，以便 LLM 知道发生了什么
-            tool_msg.content = result.success ? result.result : "工具执行失败: " + result.error_message;
-            tool_msg.tool_name = call.name;
-            messages_->addMessage(tool_msg);
-        }
+            // 逐个执行工具并添加工具结果消息
+            for (const auto& call : llm_response.tool_calls) {
+                output_callback_->onToolExecuting(call.name, call.arguments);
 
-        // 递归调用直到没有工具调用
-        return step("", response);
-    } else {
-        // 最终响应
-        response = llm_response.content;
-        messages_->addMessage("assistant", llm_response.content);
-        output_callback_->onAssistantMessage(response);
-        return true;
+                auto result = tools_->executeTool(call.name, call.arguments, call.id);
+
+                if (result.success) {
+                    output_callback_->onToolResult(call.name, result.result, result.execution_time_ms, true);
+                } else {
+                    output_callback_->onToolResult(call.name, result.error_message, result.execution_time_ms, false);
+                }
+
+                // 添加工具结果消息（每个工具调用单独一条消息）
+                ChatMessage tool_msg;
+                tool_msg.role = "tool";
+                tool_msg.tool_call_id = call.id;
+                // 即使失败也添加结果，以便 LLM 知道发生了什么
+                tool_msg.content = result.success ? result.result : "工具执行失败: " + result.error_message;
+                tool_msg.tool_name = call.name;
+                messages_->addMessage(tool_msg);
+            }
+
+            // 递归调用直到没有工具调用
+            return step("", response);
+        } else {
+            // 最终响应
+            response = llm_response.content;
+            messages_->addMessage("assistant", llm_response.content);
+            output_callback_->onAssistantMessage(response);
+            return true;
+        }
+    } catch (const std::exception& e) {
+        Logger::instance().error("step异常: " + std::string(e.what()));
+        response = "执行异常: " + std::string(e.what());
+        try {
+            output_callback_->onError(response);
+        } catch (...) {
+            Logger::instance().error("onError回调也异常了");
+        }
+        return false;
     }
 }
 

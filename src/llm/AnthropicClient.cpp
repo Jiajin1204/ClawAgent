@@ -130,9 +130,11 @@ bool AnthropicClient::chat(const std::vector<Message>& messages,
         json anthropic_tools = json::array();
         for (const auto& tool : tools) {
             json t;
-            t["name"] = tool["name"];
-            t["description"] = tool["description"];
-            t["input_schema"] = tool["parameters"];
+            // getToolDefinitions returns OpenAI format: {"type":"function","function":{"name":...,"description":...,"parameters":...}}
+            // Anthropic expects: {"name":...,"description":...,"input_schema":...}
+            t["name"] = tool["function"].value("name", "");
+            t["description"] = tool["function"].value("description", "");
+            t["input_schema"] = tool["function"].value("parameters", json::object());
             anthropic_tools.push_back(t);
         }
         body["tools"] = anthropic_tools;

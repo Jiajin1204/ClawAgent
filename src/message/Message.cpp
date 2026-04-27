@@ -19,47 +19,81 @@ Message ClawAgent::Message::fromJson(const json& j) {
 }
 
 json ClawAgent::Message::toJson() const {
-    json j;
-    j["role"] = role;
+    try {
+        json j;
+        j["role"] = role;
 
-    // For assistant messages with tool_use blocks (OpenAI format):
-    // - content should be a string (the text content from LLM)
-    // - tool_calls should be an array
-    // We do NOT put content_blocks in the "content" field for OpenAI compatibility
-    if (role == "assistant" && !content_blocks.empty()) {
-        // content stays as string (may be empty if LLM only returned tool calls)
-        j["content"] = content;
+        // For assistant messages with tool_use blocks (OpenAI format):
+        // - content should be a string (the text content from LLM)
+        // - tool_calls should be an array
+        // We do NOT put content_blocks in the "content" field for OpenAI compatibility
+        if (role == "assistant" && !content_blocks.empty()) {
+            // content stays as string (may be empty if LLM only returned tool calls)
+            j["content"] = content.empty() ? "" : content;
 
-        // Add tool_calls array for OpenAI
-        json tool_calls = json::array();
-        for (const auto& block : content_blocks) {
-            if (block.contains("type") && block["type"] == "tool_use") {
-                json tc;
-                tc["id"] = block.value("id", "");
-                tc["type"] = "function";
-                tc["function"]["name"] = block.value("name", "");
-                tc["function"]["arguments"] = block.value("input", json::object()).dump();
-                tool_calls.push_back(tc);
+            // Add tool_calls array for OpenAI
+            json tool_calls = json::array();
+            for (const auto& block : content_blocks) {
+                if (block.contains("type") && block["type"] == "tool_use") {
+                    json tc;
+                    tc["id"] = block.value("id", "");
+                    tc["type"] = "function";
+                    tc["function"]["name"] = block.value("name", "");
+
+                    // Handle input properly - could be string, number, binary, or object
+                    json input_val;
+                    try {
+                        input_val = block.value("input", json::object());
+                    } catch (const json::type_error& e) {
+                        Logger::instance().error("Failed to get input from block: " + std::string(e.what()));
+                        continue;
+                    }
+
+                    if (input_val.is_string()) {
+                        // If input is a string like "ls -la", convert to {"command": "ls -la"}
+                        tc["function"]["arguments"] = json{{"command", input_val.get<std::string>()}}.dump();
+                    } else if (input_val.is_object()) {
+                        tc["function"]["arguments"] = input_val.dump();
+                    } else if (input_val.is_number()) {
+                        tc["function"]["arguments"] = json{{"value", input_val}}.dump();
+                    } else if (input_val.is_binary()) {
+                        // Binary type - serialize as-is using dump()
+                        tc["function"]["arguments"] = input_val.dump();
+                    } else if (input_val.is_null()) {
+                        tc["function"]["arguments"] = json::object().dump();
+                    } else {
+                        // For other types (boolean, etc), convert to string
+                        tc["function"]["arguments"] = json{{"value", input_val.dump()}}.dump();
+                    }
+                    tool_calls.push_back(tc);
+                }
             }
+            if (!tool_calls.empty()) {
+                j["tool_calls"] = tool_calls;
+            }
+        } else if (!content_blocks.empty()) {
+            // For other cases (shouldn't happen normally), use content_blocks
+            j["content"] = content_blocks;
+        } else {
+            j["content"] = content.empty() ? "" : content;
         }
-        if (!tool_calls.empty()) {
-            j["tool_calls"] = tool_calls;
+
+        if (!name.empty()) {
+            j["name"] = name;
         }
-    } else if (!content_blocks.empty()) {
-        // For other cases (shouldn't happen normally), use content_blocks
-        j["content"] = content_blocks;
-    } else {
-        j["content"] = content;
-    }
+        if (!tool_call_id.empty()) {
+            j["tool_call_id"] = tool_call_id;
+        }
 
-    if (!name.empty()) {
-        j["name"] = name;
+        return j;
+    } catch (const json::type_error& e) {
+        Logger::instance().error("JSON type error in Message::toJson: " + std::string(e.what()));
+        // Return minimal valid message on error
+        json j;
+        j["role"] = role;
+        j["content"] = "";
+        return j;
     }
-    if (!tool_call_id.empty()) {
-        j["tool_call_id"] = tool_call_id;
-    }
-
-    return j;
 }
 
 ChatMessage ClawAgent::ChatMessage::fromJson(const json& j) {

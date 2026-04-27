@@ -261,10 +261,6 @@ void ToolManager::registerDefaultTools() {
                 {"command", json{
                     {"type", "string"},
                     {"description", "要执行的命令或脚本"}
-                }},
-                {"cmd", json{
-                    {"type", "string"},
-                    {"description", "要执行的命令或脚本"}
                 }}
             }},
             {"required", {"command"}}
@@ -282,9 +278,12 @@ std::vector<json> ToolManager::getToolDefinitions() const {
     for (const auto& pair : tools_) {
         const auto& tool = pair.second;
         definitions.push_back(json{
-            {"name", tool.name},
-            {"description", tool.description},
-            {"parameters", tool.parameters}
+            {"type", "function"},
+            {"function", json{
+                {"name", tool.name},
+                {"description", tool.description},
+                {"parameters", tool.parameters}
+            }}
         });
     }
 
