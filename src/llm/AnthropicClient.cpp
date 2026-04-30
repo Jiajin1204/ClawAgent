@@ -3,9 +3,13 @@
 #include "utils/Logger.hpp"
 
 #include <sstream>
+#include <errno.h>
 
 #ifndef NO_CURL
 #include <curl/curl.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <poll.h>
 #endif
 
 using namespace ClawAgent;
@@ -21,7 +25,43 @@ size_t writeCallback(void* contents, size_t size, size_t nmemb, std::string* s) 
     }
     return newLen;
 }
+
+struct SocketContext {
+    AnthropicClient* client;
+    curl_socket_t wakeup_fd;
+};
 } // anonymous namespace
+
+// CURLMOPT_SOCKETFUNCTION callback - defined outside anonymous namespace as class static member
+int AnthropicClient::socketCallback(CURL* easy, curl_socket_t s, int action, void* userp) {
+    (void)easy;
+    SocketContext* ctx = static_cast<SocketContext*>(userp);
+    if (!ctx || !ctx->client) {
+        return 0;
+    }
+
+    switch (action) {
+        case CURL_POLL_IN:
+        case CURL_POLL_OUT:
+        case CURL_POLL_INOUT:
+            ctx->client->onCurlSocket(s, action);
+            break;
+        case CURL_POLL_REMOVE:
+            ctx->client->onCurlSocketRemove(s);
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
+// CURLMOPT_TIMERFUNCTION callback
+int AnthropicClient::timerCallback(CURLM* multi, long timeout_ms, void* userp) {
+    (void)multi;
+    (void)timeout_ms;
+    (void)userp;
+    return 0;
+}
 #endif
 
 AnthropicClient::AnthropicClient(const std::string& model,
@@ -46,6 +86,22 @@ AnthropicClient::AnthropicClient(const std::string& model,
         curl_easy_cleanup(curl_);
         throw std::runtime_error("无法初始化CURL multi");
     }
+
+    // 创建socket pair用于wakeup
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, wakeup_fds_) != 0) {
+        curl_multi_cleanup(curl_multi_);
+        curl_easy_cleanup(curl_);
+        throw std::runtime_error("无法创建wakeup socket pair");
+    }
+
+    // 设置socket callback和timer callback
+    SocketContext* ctx = new SocketContext{this, wakeup_fds_[0]};
+    curl_multi_setopt(curl_multi_, CURLMOPT_SOCKETFUNCTION, socketCallback);
+    curl_multi_setopt(curl_multi_, CURLMOPT_SOCKETDATA, ctx);
+
+    curl_multi_setopt(curl_multi_, CURLMOPT_TIMERFUNCTION, timerCallback);
+    curl_multi_setopt(curl_multi_, CURLMOPT_TIMERDATA, ctx);
+
     curl_easy_setopt(curl_, CURLOPT_TIMEOUT_MS, timeout_ms);
     curl_easy_setopt(curl_, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 1L);
@@ -58,8 +114,19 @@ AnthropicClient::AnthropicClient(const std::string& model,
 
 AnthropicClient::~AnthropicClient() {
 #ifndef NO_CURL
+    // 清理socket context
+    curl_multi_setopt(curl_multi_, CURLMOPT_SOCKETDATA, nullptr);
+    curl_multi_setopt(curl_multi_, CURLMOPT_TIMERDATA, nullptr);
+
+    // 关闭wakeup sockets
+    if (wakeup_fds_[0] >= 0) {
+        close(wakeup_fds_[0]);
+    }
+    if (wakeup_fds_[1] >= 0) {
+        close(wakeup_fds_[1]);
+    }
+
     if (curl_multi_) {
-        curl_multi_remove_handle(curl_multi_, curl_);
         curl_multi_cleanup(curl_multi_);
     }
     if (curl_) {
@@ -69,14 +136,33 @@ AnthropicClient::~AnthropicClient() {
 }
 
 void AnthropicClient::abort() {
+    Logger::instance().info("AnthropicClient::abort() called");
+    abort_requested_.store(true, std::memory_order_relaxed);
 #ifndef NO_CURL
-    if (curl_multi_) {
-        curl_multi_remove_handle(curl_multi_, curl_);
-        curl_easy_reset(curl_);
-        curl_multi_add_handle(curl_multi_, curl_);
+    // 关闭wakeup socket，唤醒poll循环
+    if (wakeup_fds_[1] >= 0) {
+        close(wakeup_fds_[1]);
+        wakeup_fds_[1] = -1;
     }
 #endif
 }
+
+#ifndef NO_CURL
+void AnthropicClient::onCurlSocket(curl_socket_t s, int action) {
+    int events = 0;
+    if (action == CURL_POLL_IN || action == CURL_POLL_INOUT) {
+        events |= POLLIN;
+    }
+    if (action == CURL_POLL_OUT || action == CURL_POLL_INOUT) {
+        events |= POLLOUT;
+    }
+    curl_sockets_[s] = events;
+}
+
+void AnthropicClient::onCurlSocketRemove(curl_socket_t s) {
+    curl_sockets_.erase(s);
+}
+#endif
 
 bool AnthropicClient::chat(const std::vector<Message>& messages,
                           const std::vector<json>& tools,
@@ -193,6 +279,24 @@ bool AnthropicClient::makeRequest(const std::string& url,
                                  const json& body,
                                  std::string& response,
                                  bool stream) {
+    abort_requested_.store(false, std::memory_order_relaxed);
+#ifndef NO_CURL
+    curl_sockets_.clear();
+
+    // 如果wakeup socket被之前的abort关闭了，需要重新创建
+    if (wakeup_fds_[1] < 0) {
+        // 关闭旧的读端（如果还有效）
+        if (wakeup_fds_[0] >= 0) {
+            close(wakeup_fds_[0]);
+            wakeup_fds_[0] = -1;
+        }
+        // 重新创建socket pair
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, wakeup_fds_) != 0) {
+            Logger::instance().error("无法重新创建wakeup socket pair");
+        }
+    }
+#endif
+
     curl_easy_setopt(curl_, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl_, CURLOPT_POST, 1L);
 
@@ -220,18 +324,90 @@ bool AnthropicClient::makeRequest(const std::string& url,
     int still_running = 1;
     CURLMcode mres = curl_multi_perform(curl_multi_, &still_running);
 
+#ifndef NO_CURL
+    // 使用自己的poll循环，能够被wakeup socket中止
+    while (mres == CURLM_OK && still_running && !abort_requested_.load(std::memory_order_relaxed)) {
+        // 构建poll fd数组
+        std::vector<struct pollfd> pollfds;
+
+        // 添加curl的socket
+        for (const auto& pair : curl_sockets_) {
+            struct pollfd pfd;
+            pfd.fd = pair.first;
+            pfd.events = pair.second;
+            pfd.revents = 0;
+            pollfds.push_back(pfd);
+        }
+
+        // 添加wakeup socket (读端)
+        if (wakeup_fds_[0] >= 0) {
+            struct pollfd pfd;
+            pfd.fd = wakeup_fds_[0];
+            pfd.events = POLLIN;
+            pfd.revents = 0;
+            pollfds.push_back(pfd);
+        }
+
+        // 调用poll，等待事件或wakeup
+        int poll_res = poll(pollfds.data(), pollfds.size(), 1000);
+
+        if (poll_res < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+
+        if (poll_res == 0) {
+            // 超时
+            mres = curl_multi_perform(curl_multi_, &still_running);
+            continue;
+        }
+
+        // 检查wakeup socket是否触发
+        bool wakeup_triggered = false;
+        for (const auto& pfd : pollfds) {
+            if (pfd.fd == wakeup_fds_[0] && (pfd.revents & (POLLIN | POLLHUP | POLLERR))) {
+                wakeup_triggered = true;
+                break;
+            }
+        }
+
+        if (wakeup_triggered) {
+            Logger::instance().info("请求被中止 (wakeup triggered)");
+            break;
+        }
+
+        // 处理curl socket事件
+        for (const auto& pfd : pollfds) {
+            if (pfd.fd == wakeup_fds_[0]) continue;
+            if (pfd.revents) {
+                int ev = 0;
+                if (pfd.revents & (POLLIN | POLLERR | POLLHUP)) ev |= CURL_CSELECT_IN;
+                if (pfd.revents & POLLOUT) ev |= CURL_CSELECT_OUT;
+                mres = curl_multi_socket_action(curl_multi_, pfd.fd, ev, &still_running);
+            }
+        }
+    }
+#else
     while (mres == CURLM_OK && still_running) {
-        // 使用超时进行 select
         int numfds = 0;
-        mres = curl_multi_wait(curl_multi_, nullptr, 0, 1000, &numfds);  // 1秒超时
+        mres = curl_multi_wait(curl_multi_, nullptr, 0, 1000, &numfds);
         if (mres != CURLM_OK) {
             break;
         }
         mres = curl_multi_perform(curl_multi_, &still_running);
     }
+#endif
 
     curl_multi_remove_handle(curl_multi_, curl_);
     curl_slist_free_all(headers);
+
+    // 检查是否被中止
+    if (abort_requested_.load(std::memory_order_relaxed)) {
+        Logger::instance().info("请求被中止");
+        return false;
+    }
 
     // 获取结果
     CURLMsg* msg = nullptr;

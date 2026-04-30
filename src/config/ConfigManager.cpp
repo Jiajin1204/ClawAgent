@@ -77,6 +77,13 @@ ConfigManager::ModelConfig ConfigManager::getModelConfig() const {
     cfg.provider = model.value("provider", "openai");
     cfg.name = model.value("name", "gpt-4");
     cfg.api_key = expandEnvVars(model.value("api_key", ""));
+    // 如果配置文件中的 key 为空，则从环境变量获取
+    if (cfg.api_key.empty()) {
+        const char* env_key = std::getenv("CLAWAGENT_LLM_KEY");
+        if (env_key) {
+            cfg.api_key = env_key;
+        }
+    }
     cfg.base_url = model.value("base_url", "https://api.openai.com/v1");
     cfg.stream = model.value("stream", true);
     cfg.timeout_ms = model.value("timeout_ms", 120000);

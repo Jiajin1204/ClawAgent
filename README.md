@@ -9,7 +9,7 @@
 - **工具系统**: 内置read/write/exec三个核心工具
 - **流式输出**: 支持模型响应和终端输出的双重流式
 - **多实例支持**: 线程安全的设计
-- **停止机制**: 防止Agent循环
+- **停止/取消机制**: 防止Agent循环，支持从另一线程中止LLM调用（socket pair + poll方案）
 - **单元测试**: 完整的Google Test测试框架 (39个测试用例)
 
 ## 系统要求
@@ -96,8 +96,6 @@ export ANDROID_NDK_HOME=/path/to/android-ndk
 - `config.openai.json` - OpenAI 兼容接口配置（qwen3.6-plus-cc）
 - `config.anthropic.json` - Anthropic 兼容接口配置（MiniMax-M2.7）
 
-**注意**: 请勿将包含真实 API Key 的配置文件提交到仓库！
-
 ### 配置文件对比
 
 | 配置文件 | 模型 | 提供商 | 工具调用格式 |
@@ -121,16 +119,27 @@ cp config.openai.json config.json
 # 注意：config.openai.json 使用的是 qwen3.6-plus-cc 模型
 ```
 
-或使用环境变量:
+### API Key 配置
+
+项目支持通过**环境变量**配置 API Key，配置文件中的 key 优先级更高：
+
+```bash
+# 设置环境变量
+export CLAWAGENT_LLM_KEY="your-api-key-here"
+```
+
+配置文件中的 `api_key` 优先使用配置文件中的值，如果留空则读取环境变量 `CLAWAGENT_LLM_KEY`。
 
 ```json
 {
     "model": {
-        "api_key": "${YOUR_API_KEY}",
+        "api_key": "",  // 为空时自动读取 CLAWAGENT_LLM_KEY 环境变量
         ...
     }
 }
 ```
+
+**安全提示**: 切勿将包含真实 API Key 的配置文件提交到仓库！
 
 ### 配置项说明
 
@@ -216,7 +225,8 @@ ClawAgent/
 ├── config.openai.json      # OpenAI配置文件模板
 ├── config.anthropic.json   # Anthropic配置文件模板
 ├── README.md               # 本文档
-├── docs/                   # 开发日记
+├── doc/                    # 开发文档
+│   └── abort_implementation.md  # abort机制实现方案
 ├── include/                # 头文件
 │   ├── ClawAgent.hpp       # 主类
 │   ├── config/             # 配置管理
@@ -229,6 +239,7 @@ ClawAgent/
 │       └── Output.hpp      # 统一输出层
 ├── src/                    # 源文件
 ├── tests/                  # 测试
+│   ├── test_abort.cpp      # abort/cancel功能测试
 │   ├── test_config.cpp     # 配置测试
 │   ├── test_message.cpp    # 消息测试
 │   └── test_tool.cpp       # 工具测试

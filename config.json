@@ -2,7 +2,7 @@
     "model": {
         "provider": "openai",
         "name": "qwen-plus",
-        "api_key": "sk-xxxxxxxxxx",
+        "api_key": "",
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "stream": true,
         "timeout_ms": 120000
