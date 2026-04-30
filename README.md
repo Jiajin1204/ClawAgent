@@ -225,7 +225,7 @@ ClawAgent/
 ├── config.openai.json      # OpenAI配置文件模板
 ├── config.anthropic.json   # Anthropic配置文件模板
 ├── README.md               # 本文档
-├── doc/                    # 开发文档
+├── docs/                   # 开发文档
 │   └── abort_implementation.md  # abort机制实现方案
 ├── include/                # 头文件
 │   ├── ClawAgent.hpp       # 主类
