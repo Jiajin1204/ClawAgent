@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <atomic>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include "message/Message.hpp"
 #include "llm/ILlmClient.hpp"
@@ -40,6 +42,7 @@ public:
     std::string getProvider() const override { return "openai"; }
     std::string getModelName() const override { return model_; }
     bool healthCheck() override;
+    void abort() override;
 
 private:
     // HTTP请求
@@ -62,6 +65,9 @@ private:
 
 #ifndef NO_CURL
     CURL* curl_;
+    CURLM* curl_multi_;       // 用于支持中止功能
+    std::mutex curl_mutex_;   // 保护 curl 操作
+    std::atomic<bool> aborted_;
 #else
     void* curl_;
 #endif

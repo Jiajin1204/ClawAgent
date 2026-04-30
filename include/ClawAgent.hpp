@@ -59,6 +59,9 @@ public:
     // 停止运行
     void stop();
 
+    // 取消当前任务（可从另一线程调用，使当前任务快速停止）
+    void cancel();
+
     // 检查是否正在运行
     bool isRunning() const;
 

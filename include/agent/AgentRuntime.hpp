@@ -56,6 +56,9 @@ public:
     // 停止运行
     void stop();
 
+    // 中止当前操作（用于从另一线程终止正在进行的任务）
+    void cancel();
+
     // 获取运行时统计
     RuntimeStats getStats() const;
 
@@ -88,6 +91,7 @@ private:
 
     std::atomic<bool> running_;
     std::atomic<bool> stop_requested_;
+    std::atomic<bool> cancelled_;     // 用于从另一线程中止当前任务
     RuntimeStats stats_;
 
     // 循环检测

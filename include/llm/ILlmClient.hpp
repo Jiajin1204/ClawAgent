@@ -47,6 +47,12 @@ public:
      * @return 是否可用
      */
     virtual bool healthCheck() = 0;
+
+    /**
+     * @brief 中止当前请求
+     * 可用于终止正在进行的 LLM 调用，从其他线程安全调用
+     */
+    virtual void abort() = 0;
 };
 
 } // namespace ClawAgent

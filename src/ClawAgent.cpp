@@ -241,6 +241,13 @@ void ClawAgentCore::stop() {
     output_callback_->onAssistantMessage("再见!");
 }
 
+void ClawAgentCore::cancel() {
+    Logger::instance().info("ClawAgentCore::cancel() called");
+    if (agent_runtime_) {
+        agent_runtime_->cancel();
+    }
+}
+
 bool ClawAgentCore::isRunning() const {
     return running_;
 }

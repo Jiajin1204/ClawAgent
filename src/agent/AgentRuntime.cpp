@@ -24,7 +24,8 @@ AgentRuntime::AgentRuntime(std::shared_ptr<ConfigManager> config,
     , tools_(tools)
     , output_callback_(&Output::instance())
     , running_(false)
-    , stop_requested_(false) {
+    , stop_requested_(false)
+    , cancelled_(false) {
 
     stats_ = RuntimeStats{};
     stats_.iterations = 0;
@@ -88,6 +89,10 @@ bool AgentRuntime::run(const std::string& user_input, std::string& final_respons
     running_ = true;
     stop_requested_ = false;
 
+    // 重置统计和循环检测
+    stats_.iterations = 0;
+    recent_actions_.clear();
+
     auto start_time = std::chrono::high_resolution_clock::now();
 
     // 添加用户消息
@@ -106,10 +111,16 @@ bool AgentRuntime::run(const std::string& user_input, std::string& final_respons
 bool AgentRuntime::step(const std::string& /*user_input*/, std::string& response) {
     Logger::instance().info("STEP START");
 
-    // 检查停止条件
+    // 检查停止条件（包括取消）
     if (shouldStop()) {
-        response = "Agent已停止: " + stats_.stop_reason;
-        output_callback_->onError(response);
+        if (cancelled_.load(std::memory_order_relaxed)) {
+            response = "任务已取消";
+            cancelled_.store(false, std::memory_order_relaxed);
+            output_callback_->onError(response);
+        } else {
+            response = "Agent已停止: " + stats_.stop_reason;
+            output_callback_->onError(response);
+        }
         return false;
     }
 
@@ -144,7 +155,22 @@ bool AgentRuntime::step(const std::string& /*user_input*/, std::string& response
 
         // 非流式模式
         if (!llm_->chat(all_messages, tool_defs, llm_response)) {
+            // 检查是否因为取消而失败
+            if (cancelled_.load(std::memory_order_relaxed)) {
+                response = "任务已取消";
+                cancelled_.store(false, std::memory_order_relaxed);
+                output_callback_->onError(response);
+                return false;
+            }
             response = "LLM调用失败: " + llm_response.content;
+            output_callback_->onError(response);
+            return false;
+        }
+
+        // 再次检查取消标志（LLM调用成功后）
+        if (cancelled_.load(std::memory_order_relaxed)) {
+            response = "任务已取消";
+            cancelled_.store(false, std::memory_order_relaxed);
             output_callback_->onError(response);
             return false;
         }
@@ -202,6 +228,9 @@ bool AgentRuntime::step(const std::string& /*user_input*/, std::string& response
                 tool_msg.content = result.success ? result.result : "工具执行失败: " + result.error_message;
                 tool_msg.tool_name = call.name;
                 messages_->addMessage(tool_msg);
+
+                // 记录动作用于循环检测
+                recordStep(call.name, call.arguments.dump());
             }
 
             // 递归调用直到没有工具调用
@@ -233,6 +262,11 @@ bool AgentRuntime::shouldStop() {
         return true;
     }
 
+    if (cancelled_.load(std::memory_order_relaxed)) {
+        stats_.stop_reason = "任务已取消";
+        return true;
+    }
+
     if (stats_.iterations >= agent_config.max_iterations) {
         stats_.stop_reason = "达到最大迭代次数: " + std::to_string(agent_config.max_iterations);
         return true;
@@ -261,6 +295,15 @@ void AgentRuntime::stop() {
     running_ = false;
     stats_.stop_reason = "手动停止";
     stats_.stopped = true;
+}
+
+void AgentRuntime::cancel() {
+    Logger::instance().info("AgentRuntime::cancel() called");
+    cancelled_.store(true, std::memory_order_relaxed);
+    // 中止 LLM 调用
+    if (llm_) {
+        llm_->abort();
+    }
 }
 
 AgentRuntime::RuntimeStats AgentRuntime::getStats() const {

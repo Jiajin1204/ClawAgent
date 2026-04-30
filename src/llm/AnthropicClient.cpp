@@ -35,15 +35,23 @@ AnthropicClient::AnthropicClient(const std::string& model,
     , stream_(stream)
     , timeout_ms_(timeout_ms)
 #ifndef NO_CURL
-    , curl_(curl_easy_init()) {
+    , curl_(curl_easy_init())
+    , curl_multi_(curl_multi_init())
+    , aborted_(false)
+{
 
     if (!curl_) {
         throw std::runtime_error("无法初始化CURL");
+    }
+    if (!curl_multi_) {
+        curl_easy_cleanup(curl_);
+        throw std::runtime_error("无法初始化CURL multi");
     }
     curl_easy_setopt(curl_, CURLOPT_TIMEOUT_MS, timeout_ms);
     curl_easy_setopt(curl_, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_multi_setopt(curl_multi_, CURLMOPT_MAX_CONCURRENT_STREAMS, 1L);
 #else
     , curl_(nullptr) {
 #endif
@@ -51,8 +59,24 @@ AnthropicClient::AnthropicClient(const std::string& model,
 
 AnthropicClient::~AnthropicClient() {
 #ifndef NO_CURL
+    abort();  // 确保任何进行中的请求被中止
+    if (curl_multi_) {
+        curl_multi_cleanup(curl_multi_);
+    }
     if (curl_) {
         curl_easy_cleanup(curl_);
+    }
+#endif
+}
+
+void AnthropicClient::abort() {
+#ifndef NO_CURL
+    std::lock_guard<std::mutex> lock(curl_mutex_);
+    aborted_.store(true, std::memory_order_relaxed);
+    if (curl_multi_) {
+        curl_multi_remove_handle(curl_multi_, curl_);
+        curl_easy_reset(curl_);
+        curl_multi_add_handle(curl_multi_, curl_);
     }
 #endif
 }
@@ -172,6 +196,20 @@ bool AnthropicClient::makeRequest(const std::string& url,
                                  const json& body,
                                  std::string& response,
                                  bool stream) {
+    // 检查是否已被中止
+    if (aborted_.load(std::memory_order_relaxed)) {
+        Logger::instance().warning("请求已被中止 (makeRequest开始前)");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(curl_mutex_);
+
+    // 再次检查（加锁后）
+    if (aborted_.load(std::memory_order_relaxed)) {
+        Logger::instance().warning("请求已被中止 (加锁后)");
+        return false;
+    }
+
     curl_easy_setopt(curl_, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl_, CURLOPT_POST, 1L);
 
@@ -192,8 +230,49 @@ bool AnthropicClient::makeRequest(const std::string& url,
     curl_easy_setopt(curl_, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(curl_, CURLOPT_WRITEDATA, &response);
 
-    CURLcode res = curl_easy_perform(curl_);
+    // 使用 curl_multi 进行可中止的请求
+    curl_multi_remove_handle(curl_multi_, curl_);
+    curl_multi_add_handle(curl_multi_, curl_);
+
+    int still_running = 1;
+    CURLMcode mres = curl_multi_perform(curl_multi_, &still_running);
+
+    while (mres == CURLM_OK && still_running) {
+        // 检查中止标志
+        if (aborted_.load(std::memory_order_relaxed)) {
+            curl_multi_remove_handle(curl_multi_, curl_);
+            curl_slist_free_all(headers);
+            Logger::instance().warning("请求已被中止 (curl_multi_perform中)");
+            return false;
+        }
+
+        // 使用超时进行 select
+        int numfds = 0;
+        mres = curl_multi_wait(curl_multi_, nullptr, 0, 1000, &numfds);  // 1秒超时
+        if (mres != CURLM_OK) {
+            break;
+        }
+        mres = curl_multi_perform(curl_multi_, &still_running);
+    }
+
+    curl_multi_remove_handle(curl_multi_, curl_);
     curl_slist_free_all(headers);
+
+    if (aborted_.load(std::memory_order_relaxed)) {
+        Logger::instance().warning("请求已被中止 (完成前)");
+        return false;
+    }
+
+    // 获取结果
+    CURLMsg* msg = nullptr;
+    int msgs_left = 0;
+    CURLcode res = CURLE_OK;
+    while ((msg = curl_multi_info_read(curl_multi_, &msgs_left))) {
+        if (msg->msg == CURLMSG_DONE) {
+            res = msg->data.result;
+            break;
+        }
+    }
 
     if (res != CURLE_OK) {
         Logger::instance().error("CURL请求失败: " + std::string(curl_easy_strerror(res)));
