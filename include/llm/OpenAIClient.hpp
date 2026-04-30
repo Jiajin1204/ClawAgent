@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <atomic>
 #include <nlohmann/json.hpp>
 #include "message/Message.hpp"
 #include "llm/ILlmClient.hpp"
@@ -64,6 +65,7 @@ private:
 #ifndef NO_CURL
     CURL* curl_;
     CURLM* curl_multi_;       // 用于支持中止功能
+    std::atomic<bool> aborted_;
 #else
     void* curl_;
 #endif
