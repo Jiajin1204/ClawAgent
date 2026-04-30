@@ -95,10 +95,21 @@ bool AgentRuntime::run(const std::string& user_input, std::string& final_respons
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    // 添加用户消息
+    // 保存消息历史副本，用于失败时恢复
+    auto messages_backup = messages_->getHistory();
+
+    // 先添加用户消息
     messages_->addMessage("user", user_input);
 
     bool success = step(user_input, final_response);
+
+    // 如果失败，恢复消息历史
+    if (!success) {
+        messages_->clearHistory();
+        for (const auto& msg : messages_backup) {
+            messages_->addMessage(msg);
+        }
+    }
 
     auto end_time = std::chrono::high_resolution_clock::now();
     stats_.total_time_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
