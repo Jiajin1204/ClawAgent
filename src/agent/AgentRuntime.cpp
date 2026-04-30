@@ -89,21 +89,16 @@ bool AgentRuntime::run(const std::string& user_input, std::string& final_respons
     running_ = true;
     stop_requested_ = false;
 
-    // 重置取消标志
-    cancelled_.store(false, std::memory_order_relaxed);
-
     // 重置统计和循环检测
     stats_.iterations = 0;
     recent_actions_.clear();
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    bool success = step(user_input, final_response);
+    // 添加用户消息
+    messages_->addMessage("user", user_input);
 
-    // 只有成功完成（未被取消/停止）才记录用户消息
-    if (success) {
-        messages_->addMessage("user", user_input);
-    }
+    bool success = step(user_input, final_response);
 
     auto end_time = std::chrono::high_resolution_clock::now();
     stats_.total_time_ms += std::chrono::duration_cast<std::chrono::milliseconds>(

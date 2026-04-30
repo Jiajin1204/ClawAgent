@@ -37,7 +37,6 @@ AnthropicClient::AnthropicClient(const std::string& model,
 #ifndef NO_CURL
     , curl_(curl_easy_init())
     , curl_multi_(curl_multi_init())
-    , aborted_(false)
 {
 
     if (!curl_) {
@@ -71,7 +70,6 @@ AnthropicClient::~AnthropicClient() {
 
 void AnthropicClient::abort() {
 #ifndef NO_CURL
-    aborted_.store(true, std::memory_order_relaxed);
     if (curl_multi_) {
         curl_multi_remove_handle(curl_multi_, curl_);
         curl_easy_reset(curl_);
@@ -195,9 +193,6 @@ bool AnthropicClient::makeRequest(const std::string& url,
                                  const json& body,
                                  std::string& response,
                                  bool stream) {
-    // 重置中止标志
-    aborted_.store(false, std::memory_order_relaxed);
-
     curl_easy_setopt(curl_, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl_, CURLOPT_POST, 1L);
 
@@ -226,13 +221,6 @@ bool AnthropicClient::makeRequest(const std::string& url,
     CURLMcode mres = curl_multi_perform(curl_multi_, &still_running);
 
     while (mres == CURLM_OK && still_running) {
-        // 检查中止标志
-        if (aborted_.load(std::memory_order_relaxed)) {
-            curl_multi_remove_handle(curl_multi_, curl_);
-            curl_slist_free_all(headers);
-            return false;
-        }
-
         // 使用超时进行 select
         int numfds = 0;
         mres = curl_multi_wait(curl_multi_, nullptr, 0, 1000, &numfds);  // 1秒超时
@@ -244,11 +232,6 @@ bool AnthropicClient::makeRequest(const std::string& url,
 
     curl_multi_remove_handle(curl_multi_, curl_);
     curl_slist_free_all(headers);
-
-    // 检查中止
-    if (aborted_.load(std::memory_order_relaxed)) {
-        return false;
-    }
 
     // 获取结果
     CURLMsg* msg = nullptr;
