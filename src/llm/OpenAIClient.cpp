@@ -38,7 +38,6 @@ OpenAIClient::OpenAIClient(const std::string& model,
 #ifndef NO_CURL
     , curl_(curl_easy_init())
     , curl_multi_(curl_multi_init())
-    , aborted_(false)
 {
 
     if (!curl_) {
@@ -60,8 +59,8 @@ OpenAIClient::OpenAIClient(const std::string& model,
 
 OpenAIClient::~OpenAIClient() {
 #ifndef NO_CURL
-    abort();  // 确保任何进行中的请求被中止
     if (curl_multi_) {
+        curl_multi_remove_handle(curl_multi_, curl_);
         curl_multi_cleanup(curl_multi_);
     }
     if (curl_) {
@@ -72,14 +71,9 @@ OpenAIClient::~OpenAIClient() {
 
 void OpenAIClient::abort() {
 #ifndef NO_CURL
-    std::lock_guard<std::mutex> lock(curl_mutex_);
-    aborted_.store(true, std::memory_order_relaxed);
     if (curl_multi_) {
-        // 从 multi handle 中移除 easy handle 并发送终止信号
         curl_multi_remove_handle(curl_multi_, curl_);
-        // 重置 easy handle 以清除任何粘滞状态
         curl_easy_reset(curl_);
-        // 重新添加以便下次使用
         curl_multi_add_handle(curl_multi_, curl_);
     }
 #endif
@@ -151,20 +145,6 @@ bool OpenAIClient::makeRequest(const std::string& url,
                                const json& body,
                                std::string& response,
                                bool stream) {
-    // 检查是否已被中止
-    if (aborted_.load(std::memory_order_relaxed)) {
-        Logger::instance().warning("请求已被中止 (makeRequest开始前)");
-        return false;
-    }
-
-    std::lock_guard<std::mutex> lock(curl_mutex_);
-
-    // 再次检查（加锁后）
-    if (aborted_.load(std::memory_order_relaxed)) {
-        Logger::instance().warning("请求已被中止 (加锁后)");
-        return false;
-    }
-
     curl_easy_setopt(curl_, CURLOPT_URL, url.c_str());
 
     if (!stream) {
@@ -195,14 +175,6 @@ bool OpenAIClient::makeRequest(const std::string& url,
     CURLMcode mres = curl_multi_perform(curl_multi_, &still_running);
 
     while (mres == CURLM_OK && still_running) {
-        // 检查中止标志
-        if (aborted_.load(std::memory_order_relaxed)) {
-            curl_multi_remove_handle(curl_multi_, curl_);
-            curl_slist_free_all(headers);
-            Logger::instance().warning("请求已被中止 (curl_multi_perform中)");
-            return false;
-        }
-
         // 使用超时进行 select
         int numfds = 0;
         mres = curl_multi_wait(curl_multi_, nullptr, 0, 1000, &numfds);  // 1秒超时
@@ -214,11 +186,6 @@ bool OpenAIClient::makeRequest(const std::string& url,
 
     curl_multi_remove_handle(curl_multi_, curl_);
     curl_slist_free_all(headers);
-
-    if (aborted_.load(std::memory_order_relaxed)) {
-        Logger::instance().warning("请求已被中止 (完成前)");
-        return false;
-    }
 
     // 获取结果
     CURLMsg* msg = nullptr;
