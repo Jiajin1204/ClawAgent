@@ -1,4 +1,12 @@
 {
+    "clawagent": {
+        "home": "~/.clawagent"
+    },
+    "skills": {
+        "load_mode": "startup",
+        "inject_all": false,
+        "enabled": []
+    },
     "model": {
         "provider": "openai",
         "name": "qwen3.6-plus-cc",
@@ -14,7 +22,7 @@
     },
     "agent": {
         "system_prompt_path": "./system_prompt.md",
-        "system_prompt": "你是一个有帮助的AI助手。",
+        "system_prompt": "",
         "max_iterations": 50,
         "stop_on_error": true
     },

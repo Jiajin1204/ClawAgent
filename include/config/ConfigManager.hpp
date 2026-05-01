@@ -76,6 +76,20 @@ public:
     };
     LoggingConfig getLoggingConfig() const;
 
+    // ClawAgent Home 配置
+    struct ClawAgentConfig {
+        std::string home;
+    };
+    ClawAgentConfig getClawAgentConfig() const;
+
+    // Skills 配置
+    struct SkillsConfig {
+        std::string load_mode;     // "startup" 或 "dynamic"
+        bool inject_all;
+        std::vector<std::string> enabled;
+    };
+    SkillsConfig getSkillsConfig() const;
+
     const json& getRawConfig() const { return config_; }
     bool isLoaded() const { return !config_.empty(); }
 

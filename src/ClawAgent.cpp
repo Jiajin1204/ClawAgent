@@ -3,6 +3,8 @@
 #include "llm/LlmClientFactory.hpp"
 #include "message/MessageManager.hpp"
 #include "tools/ToolManager.hpp"
+#include "workspace/WorkspaceManager.hpp"
+#include "skill/SkillManager.hpp"
 #include "agent/AgentRuntime.hpp"
 #include "utils/Logger.hpp"
 #include "utils/Output.hpp"
@@ -13,6 +15,7 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
+#include <unistd.h>
 
 using namespace ClawAgent;
 
@@ -65,12 +68,43 @@ ClawAgentCore::ClawAgentCore(const std::string& config_path)
         tools_config.exec_timeout_ms
     );
 
+    // 初始化 WorkspaceManager (单例)
+    auto clawagent_config = config_manager_->getClawAgentConfig();
+    workspace_manager_ = &WorkspaceManager::instance();
+    workspace_manager_->initialize(clawagent_config.home);
+
+    // 创建必要的目录结构
+    workspace_manager_->createDirectories();
+
+    // 切换到 workspace 工作目录
+    if (chdir(workspace_manager_->getWorkspace().c_str()) != 0) {
+        Logger::instance().warning("无法切换到工作目录: " + workspace_manager_->getWorkspace());
+    } else {
+        Logger::instance().info("已切换工作目录到: " + workspace_manager_->getWorkspace());
+    }
+
+    // 初始化 SkillManager
+    auto skills_config = config_manager_->getSkillsConfig();
+    SkillManager::LoadMode load_mode = (skills_config.load_mode == "dynamic")
+        ? SkillManager::LoadMode::Dynamic
+        : SkillManager::LoadMode::Startup;
+    skill_manager_ = std::make_shared<SkillManager>(
+        workspace_manager_->getWorkspace() + "/skills",
+        workspace_manager_->getGlobalSkillsDir(),
+        load_mode,
+        skills_config.inject_all,
+        skills_config.enabled
+    );
+    skill_manager_->loadSkills();
+
     // 初始化Agent运行时
     agent_runtime_ = std::make_shared<AgentRuntime>(
         config_manager_,
         llm_client_,
         message_manager_,
-        tool_manager_
+        tool_manager_,
+        workspace_manager_,
+        skill_manager_
     );
 
     // 设置输出回调到 AgentRuntime

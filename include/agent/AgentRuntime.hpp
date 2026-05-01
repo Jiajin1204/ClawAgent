@@ -13,6 +13,8 @@ namespace ClawAgent {
 class ConfigManager;
 class MessageManager;
 class ToolManager;
+class WorkspaceManager;
+class SkillManager;
 
 /**
  * @brief Agent运行时 - 核心智能体循环
@@ -36,7 +38,9 @@ public:
     AgentRuntime(std::shared_ptr<ConfigManager> config,
                  std::shared_ptr<ILlmClient> llm,
                  std::shared_ptr<MessageManager> messages,
-                 std::shared_ptr<ToolManager> tools);
+                 std::shared_ptr<ToolManager> tools,
+                 WorkspaceManager* workspace_manager = nullptr,
+                 std::shared_ptr<SkillManager> skill_manager = nullptr);
     ~AgentRuntime();
 
     // 禁用拷贝
@@ -85,6 +89,8 @@ private:
     std::shared_ptr<ILlmClient> llm_;
     std::shared_ptr<MessageManager> messages_;
     std::shared_ptr<ToolManager> tools_;
+    WorkspaceManager* workspace_manager_;  // singleton, 不需要 shared_ptr
+    std::shared_ptr<SkillManager> skill_manager_;
 
     // 输出回调（默认为 Output::instance()）
     IOutputCallback* output_callback_;

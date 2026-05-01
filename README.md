@@ -11,6 +11,8 @@
 - **多实例支持**: 线程安全的设计
 - **停止/取消机制**: 防止Agent循环，支持从另一线程中止LLM调用（socket pair + poll方案）
 - **单元测试**: 完整的Google Test测试框架 (39个测试用例)
+- **Workspace 支持**: 自动创建 home 目录结构，支持 AGENTS.md 动态加载
+- **Skill 系统**: 可复用的 skill 架构，支持 startup/dynamic 加载模式
 
 ## 系统要求
 
@@ -221,12 +223,19 @@ drwxr-xr-x  2 jason jason 4096 Apr  6 16:30 ..
 ClawAgent/
 ├── CMakeLists.txt          # CMake构建文件
 ├── build.sh                # 编译脚本
-├── config.example.json     # 配置模板（环境变量版本）
+├── config.example.json     # 配置模板
 ├── config.openai.json      # OpenAI配置文件模板
 ├── config.anthropic.json   # Anthropic配置文件模板
+├── config.json             # 默认配置文件
+├── system_prompt.md        # 系统提示词文件
+├── skills/                 # 内置 skills
+│   └── example-skill/
+│       └── SKILL.md
 ├── README.md               # 本文档
 ├── docs/                   # 开发文档
-│   └── abort_implementation.md  # abort机制实现方案
+│   ├── DEVELOPMENT_LOG.md   # 开发日记
+│   ├── abort_implementation.md  # abort机制实现方案
+│   └── workspace_and_skills_plan.md  # Workspace/Skill 开发计划
 ├── include/                # 头文件
 │   ├── ClawAgent.hpp       # 主类
 │   ├── config/             # 配置管理
@@ -234,17 +243,14 @@ ClawAgent/
 │   ├── message/            # 消息管理
 │   ├── tools/              # 工具系统
 │   ├── agent/              # Agent运行时
+│   ├── workspace/          # Workspace管理器
+│   ├── skill/              # Skill管理器
 │   └── utils/              # 工具类
 │       ├── Logger.hpp      # 日志系统
 │       └── Output.hpp      # 统一输出层
 ├── src/                    # 源文件
 ├── tests/                  # 测试
-│   ├── test_abort.cpp      # abort/cancel功能测试
-│   ├── test_config.cpp     # 配置测试
-│   ├── test_message.cpp    # 消息测试
-│   └── test_tool.cpp       # 工具测试
-└── thirdparty/             # 第三方库 (FetchContent自动下载)
-    └── nlohmann/           # JSON单文件头库
+└── thirdparty/             # 第三方库
 ```
 
 ## 工具说明

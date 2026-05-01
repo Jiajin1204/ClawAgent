@@ -3,6 +3,8 @@
 #include "llm/LlmClientFactory.hpp"
 #include "message/MessageManager.hpp"
 #include "tools/ToolManager.hpp"
+#include "workspace/WorkspaceManager.hpp"
+#include "skill/SkillManager.hpp"
 #include "utils/Logger.hpp"
 #include "utils/Output.hpp"
 
@@ -17,11 +19,15 @@ using namespace ClawAgent;
 AgentRuntime::AgentRuntime(std::shared_ptr<ConfigManager> config,
                            std::shared_ptr<ILlmClient> llm,
                            std::shared_ptr<MessageManager> messages,
-                           std::shared_ptr<ToolManager> tools)
+                           std::shared_ptr<ToolManager> tools,
+                           WorkspaceManager* workspace_manager,
+                           std::shared_ptr<SkillManager> skill_manager)
     : config_(config)
     , llm_(llm)
     , messages_(messages)
     , tools_(tools)
+    , workspace_manager_(workspace_manager)
+    , skill_manager_(skill_manager)
     , output_callback_(&Output::instance())
     , running_(false)
     , stop_requested_(false)
@@ -53,6 +59,13 @@ std::string AgentRuntime::getDynamicContext() const {
     ss << "操作系统: " << SystemTools::getOSInfo();
     ss << "主机名: " << SystemTools::getHostname() << "\n";
 
+    // Workspace 信息 (绝对路径)
+    if (workspace_manager_) {
+        ss << "工作目录: " << workspace_manager_->getWorkspace() << "\n";
+        ss << "Skills: " << workspace_manager_->getGlobalSkillsDir() << "\n";
+        ss << "会话历史: " << workspace_manager_->getSessionsDir() << "\n";
+    }
+
     // 可用工具
     ss << "可用工具:\n";
     auto tool_defs = tools_->getToolDefinitions();
@@ -68,9 +81,34 @@ std::string AgentRuntime::buildSystemPrompt() {
     auto agent_config = config_->getAgentConfig();
 
     std::stringstream ss;
-    ss << agent_config.system_prompt << "\n\n";
+
+    // 1. config.json system_prompt_path (优先)
+    if (!agent_config.system_prompt.empty()) {
+        ss << agent_config.system_prompt << "\n\n";
+    }
+
+    // 2. AGENTS.md 内容 (最后备选)
+    if (ss.str().empty() && workspace_manager_) {
+        std::string agents_md = workspace_manager_->readAgentsMd();
+        if (!agents_md.empty()) {
+            ss << agents_md << "\n\n";
+        }
+    }
+
+    // 2. Skills 内容 (如果配置了)
+    if (skill_manager_) {
+        std::string skills_context = skill_manager_->getSkillsContext();
+        if (!skills_context.empty()) {
+            ss << "=== 可用 Skills ===\n";
+            ss << skills_context << "\n";
+        }
+    }
+
+    // 3. 动态上下文
     ss << "=== 动态上下文 ===\n";
     ss << getDynamicContext();
+
+    // 4. 工具使用说明
     ss << "\n=== 工具使用说明 ===\n";
     ss << "你可以使用以下工具来完成任务:\n";
     ss << "- read: 读取文件内容\n";
@@ -81,6 +119,9 @@ std::string AgentRuntime::buildSystemPrompt() {
     ss << "2. 工具调用后请等待结果再决定下一步\n";
     ss << "3. 如果出错，请分析原因并尝试修复\n";
     ss << "4. 如果无法完成任务，请明确告知用户\n";
+    ss << "\n文件操作注意:\n";
+    ss << "- 默认工作目录是 workspace (" << (workspace_manager_ ? workspace_manager_->getWorkspace() : ".") << ")\n";
+    ss << "- 写入文件时请使用相对路径（相对于 workspace）或绝对路径\n";
 
     return ss.str();
 }

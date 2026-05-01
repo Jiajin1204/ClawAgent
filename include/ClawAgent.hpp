@@ -6,6 +6,8 @@
 #include "agent/AgentRuntime.hpp"
 #include "message/Message.hpp"
 #include "utils/OutputCallback.hpp"
+#include "workspace/WorkspaceManager.hpp"
+#include "skill/SkillManager.hpp"
 
 namespace ClawAgent {
 
@@ -93,6 +95,8 @@ private:
     std::shared_ptr<ILlmClient> llm_client_;
     std::shared_ptr<MessageManager> message_manager_;
     std::shared_ptr<ToolManager> tool_manager_;
+    WorkspaceManager* workspace_manager_;  // singleton, 不需要 shared_ptr
+    std::shared_ptr<SkillManager> skill_manager_;
     std::shared_ptr<AgentRuntime> agent_runtime_;
 };
 

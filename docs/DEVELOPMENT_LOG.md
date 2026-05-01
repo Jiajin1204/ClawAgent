@@ -357,3 +357,121 @@ while (g_agent->isRunning()) {
 **开发人员**: Claude Code
 **项目状态**: 开发中
 **版本**: 1.0.0
+
+---
+
+## 2026-05-01
+
+### Workspace 和 Skill 系统
+
+**目标**: 实现类似 OpenClaw 的 Workspace 和 Skill 架构，支持 agent 的 home 目录管理和可复用 skill 系统
+
+#### 1. WorkspaceManager
+
+管理 ClawAgent 的 home 和 workspace 目录：
+
+```cpp
+class WorkspaceManager {
+    // 目录优先级: config > env > default (~/.clawagent)
+    void initialize(const std::string& config_home);
+
+    // 目录结构
+    std::string getHome();           // ~/.clawagent
+    std::string getWorkspace();     // ~/.clawagent/workspace
+    std::string getGlobalSkillsDir(); // ~/.clawagent/skills
+    std::string getSessionsDir();   // ~/.clawagent/sessions
+    std::string getAgentsMdPath();  // workspace/AGENTS.md
+    std::string getMemoryDir();     // workspace/memory
+
+    // 递归创建目录结构
+    void createDirectories();
+
+    // 动态读取 AGENTS.md
+    std::string readAgentsMd() const;
+};
+```
+
+#### 2. SkillManager
+
+管理 skill 的加载和上下文注入：
+
+```cpp
+class SkillManager {
+    enum class LoadMode { Startup, Dynamic };
+
+    // 加载模式
+    // - startup: 启动时加载所有 skill
+    // - dynamic: 运行时按需加载
+
+    // 上下文注入配置
+    // - inject_all: 所有 skill 注入上下文
+    // - enabled: 仅注入列表中的 skill
+};
+```
+
+#### 3. 目录结构
+
+```
+~/.clawagent/              # 或 $CLAWAGENT_HOME
+├── workspace/             # 工作区 (chdir 切换到这里)
+│   ├── AGENTS.md         # agent 行为规范 (动态读取)
+│   ├── memory/          # 记忆存储
+│   └── skills/          # 工作区 skill
+├── skills/              # 全局/托管 skill
+├── sessions/            # 会话历史
+└── ...
+```
+
+#### 4. 系统提示词优先级
+
+1. `config.json` → `system_prompt_path` 文件
+2. `config.json` → `system_prompt` 字段
+3. `~/.clawagent/workspace/AGENTS.md` (最后备选)
+
+#### 5. 动态上下文
+
+提示词中新增 workspace 路径信息：
+
+```
+工作目录: /home/jason/.clawagent/workspace
+Skills: /home/jason/.clawagent/skills
+会话历史: /home/jason/.clawagent/sessions
+```
+
+#### 6. 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `include/workspace/WorkspaceManager.hpp` | Workspace 管理器 |
+| `src/workspace/WorkspaceManager.cpp` | 实现 |
+| `include/skill/SkillManager.hpp` | Skill 管理器 |
+| `include/skill/Skill.hpp` | Skill 数据结构 |
+| `src/skill/SkillManager.cpp` | 实现 |
+| `skills/example-skill/SKILL.md` | 示例 skill |
+
+#### 7. 配置变更
+
+```json
+{
+    "clawagent": {
+        "home": "~/.clawagent"
+    },
+    "skills": {
+        "load_mode": "startup",
+        "inject_all": false,
+        "enabled": []
+    }
+}
+```
+
+#### 8. 修复的问题
+
+1. `addSkillsFromDirectory` 重复解析 SKILL.md - 改用 `parseSkillFile`
+2. 目录递归创建 - `createDirectory` 递归创建父目录
+3. Skill frontmatter 解析错误 - `name:` 正确赋值给 `name` 而非 `description`
+
+---
+
+**开发人员**: Claude Code
+**项目状态**: 开发中
+**版本**: 1.0.0

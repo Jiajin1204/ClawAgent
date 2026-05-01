@@ -56,6 +56,8 @@ set(SOURCES
     src/message/MessageManager.cpp
     src/tools/ToolManager.cpp
     src/agent/AgentRuntime.cpp
+    src/workspace/WorkspaceManager.cpp
+    src/skill/SkillManager.cpp
     src/utils/Logger.cpp
     src/utils/Output.cpp
 )

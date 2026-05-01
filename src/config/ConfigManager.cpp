@@ -167,3 +167,25 @@ ConfigManager::LoggingConfig ConfigManager::getLoggingConfig() const {
 
     return cfg;
 }
+
+ConfigManager::ClawAgentConfig ConfigManager::getClawAgentConfig() const {
+    ClawAgentConfig cfg;
+    if (config_.empty()) return cfg;
+    const json& clawagent = config_.value("clawagent", json::object());
+
+    cfg.home = expandEnvVars(clawagent.value("home", ""));
+
+    return cfg;
+}
+
+ConfigManager::SkillsConfig ConfigManager::getSkillsConfig() const {
+    SkillsConfig cfg;
+    if (config_.empty()) return cfg;
+    const json& skills = config_.value("skills", json::object());
+
+    cfg.load_mode = skills.value("load_mode", "startup");
+    cfg.inject_all = skills.value("inject_all", false);
+    cfg.enabled = skills.value("enabled", std::vector<std::string>());
+
+    return cfg;
+}
