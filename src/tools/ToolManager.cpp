@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <signal.h>
 
 using namespace ClawAgent;
 
@@ -75,30 +76,73 @@ ToolExecutionResult SystemTools::execCommand(const std::string& command,
     ToolExecutionResult result;
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    FILE* pipe = popen(command.c_str(), "r");
-    if (!pipe) {
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
         result.success = false;
-        result.error_message = "无法执行命令";
+        result.error_message = "无法创建管道";
         result.execution_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start_time).count();
         return result;
     }
 
-    // 设置非阻塞读取
-    int fd = fileno(pipe);
-    int flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    pid_t pid = fork();
+    if (pid == -1) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        result.success = false;
+        result.error_message = "fork 失败";
+        result.execution_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - start_time).count();
+        return result;
+    }
 
+    if (pid == 0) {
+        // child process
+        close(pipefd[0]);  // 关闭读端
+
+        // 重定向 stdout 到 pipe 写端
+        if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
+            _exit(127);
+        }
+        close(pipefd[1]);  // 关闭多余的文件描述符
+
+        // 重定向 stderr 到 stdout
+        if (dup2(STDOUT_FILENO, STDERR_FILENO) == -1) {
+            _exit(127);
+        }
+
+#ifdef __ANDROID__
+        // Android 环境设置 PATH 并使用 /system/bin/sh
+        setenv("PATH", "/system/bin:/system/xbin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:/system_ext/bin:/product/bin:/vendor/bin:/vendor/xbin:/odm/bin:/sbin:/bin", 1);
+        execl("/system/bin/sh", "sh", "-c", command.c_str(), (char*)NULL);
+#else
+        // 默认使用 /bin/sh
+        execl("/bin/sh", "sh", "-c", command.c_str(), (char*)NULL);
+#endif
+
+        // 如果 exec 失败
+        _exit(127);
+    }
+
+    // parent process
+    close(pipefd[1]);  // 关闭写端
+
+    // 从管道读取输出
     std::string output;
     char buffer[4096];
+    ssize_t n;
 
+    // 设置超时
     auto deadline = std::chrono::high_resolution_clock::now() +
                    std::chrono::milliseconds(timeout_ms);
 
     while (true) {
         auto now = std::chrono::high_resolution_clock::now();
         if (now >= deadline) {
-            pclose(pipe);
+            // 超时，终止子进程
+            kill(pid, SIGKILL);
+            close(pipefd[0]);
+            waitpid(pid, NULL, 0);
             result.success = false;
             result.error_message = "命令执行超时";
             result.result = output;
@@ -107,25 +151,29 @@ ToolExecutionResult SystemTools::execCommand(const std::string& command,
             return result;
         }
 
-        ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
+        n = read(pipefd[0], buffer, sizeof(buffer) - 1);
         if (n > 0) {
             buffer[n] = '\0';
             output += buffer;
+        } else if (n == 0) {
+            // EOF
+            break;
         } else if (n == -1) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // 无数据可读，非阻塞模式正常情况，等待后重试
+            if (errno == EINTR) {
+                continue;  // 被信号中断，重试
+            } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 usleep(10000);  // 10ms
                 continue;
             }
-            // 其他错误
-            break;
-        } else {
-            // n == 0 表示 EOF（管道关闭）
             break;
         }
     }
 
-    int status = pclose(pipe);
+    close(pipefd[0]);
+
+    // 等待子进程结束
+    int status;
+    waitpid(pid, &status, 0);
 
     auto end_time = std::chrono::high_resolution_clock::now();
     result.execution_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
