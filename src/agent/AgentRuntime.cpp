@@ -122,6 +122,7 @@ std::string AgentRuntime::buildSystemPrompt() {
     ss << "\n文件操作注意:\n";
     ss << "- 默认工作目录是 workspace (" << (workspace_manager_ ? workspace_manager_->getWorkspace() : ".") << ")\n";
     ss << "- 写入文件时请使用相对路径（相对于 workspace）或绝对路径\n";
+    ss << "- 创建新 skill 时，存放在 ${工作目录}/skills/<skill-name>/SKILL.md\n";
 
     return ss.str();
 }

@@ -20,20 +20,21 @@ Agent 会根据 SKILL.md 中的 Workflow 步骤来执行任务，就像用户指
 - 什么时候应该使用这个 skill？
 - 任务可以分解成哪些步骤？
 
-## 步骤 2：确定 ClawAgent Home 目录路径
+## 步骤 2：确定 Skill 存放目录
 
-**关键：ClawAgent 的 home 目录来自 config.json 配置，不是固定路径**
+**关键：ClawAgent 的 skill 路径在系统提示词中有明确说明**
 
-首先确定 home 目录：
-1. 检查 `~/.clawagent` 是否存在
-2. 或者查看当前用户 home 目录：`echo $HOME`
-3. ClawAgent home 通常是 `${HOME}/.clawagent`
+从系统提示词的「动态上下文」中找到：
+- `工作目录`: 这是 workspace 的绝对路径
+- `Skills: xxx`: 这是全局 skills 目录
 
-**注意：不同用户/设备的路径可能不同**
+**新建的 skill 应该放在 workspace 下的 skills 目录**，即：`${工作目录}/skills/<skill-name>/SKILL.md`
+
+例如：`/home/jason/.clawagent/workspace/skills/my-skill/SKILL.md`
 
 ## 步骤 3：创建 SKILL.md 文件
 
-**Skill 存放位置：`~/.clawagent/skills/<skill-name>/SKILL.md`**
+**Skill 存放位置：`${工作目录}/skills/<skill-name>/SKILL.md`**
 
 格式必须是标准 Markdown：
 
@@ -62,18 +63,18 @@ description: 一句话描述 skill 用途
 
 ```json
 {
-  "command": "mkdir -p ~/.clawagent/skills/my-skill"
+  "command": "mkdir -p ${工作目录}/skills/my-skill"
 }
 ```
 
 ```json
 {
-  "path": "~/.clawagent/skills/my-skill/SKILL.md",
+  "path": "${工作目录}/skills/my-skill/SKILL.md",
   "text": "---\nname: my-skill\ndescription: ...\n---\n\n# My Skill\n\n## Workflow\n\n- ..."
 }
 ```
 
-**注意：使用 ~ 路径会由 shell 自动展开为用户 home 目录**
+**注意：使用 `${工作目录}/skills/` 作为 skill 存放目录**
 
 ## 步骤 5：通知用户
 
@@ -120,14 +121,14 @@ description: 使用 Tavily API 搜索实时新闻和最新信息
 
 **创建步骤示例：**
 
-1. `mkdir -p ~/.clawagent/skills/tavily-search`
+1. `mkdir -p ${工作目录}/skills/tavily-search`
 2. 创建 SKILL.md 文件
 
 **注意**：
 - **不需要创建脚本文件**，Workflow 就是 agent 的执行指南
 - **不需要创建 skill.yaml**，只创建 SKILL.md
 - **不需要创建 README.md**，SKILL.md 本身包含所有信息
-- **使用 ~ 路径**，shell 会自动展开为正确的 home 目录
+- **从系统提示词获取工作目录**，使用 `${工作目录}/skills/` 路径
 
 ## 注意事项
 
@@ -135,5 +136,5 @@ description: 使用 Tavily API 搜索实时新闻和最新信息
 - description 应该简洁，一句话说明用途
 - Workflow 应该清晰，每一步都有 agent 可执行的具体操作
 - When to Use 说明触发此 skill 的场景
-- **使用 ~ 路径让 shell 自动展开**
+- **从系统提示词的动态上下文获取工作目录路径**
 - **所有操作都是通过 read/write/exec 工具完成的**
