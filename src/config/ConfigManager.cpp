@@ -44,6 +44,24 @@ bool ConfigManager::load(const std::string& path) {
     try {
         file >> config_;
         LOG_INFO("配置文件加载成功: " + filepath);
+
+        // 预读取 system_prompt_path 文件内容到缓存
+        std::string prompt_path = config_.value("agent", json::object()).value("system_prompt_path", "");
+        if (!prompt_path.empty()) {
+            std::ifstream prompt_file(prompt_path);
+            if (prompt_file.is_open()) {
+                std::stringstream buffer;
+                buffer << prompt_file.rdbuf();
+                system_prompt_cache_ = buffer.str();
+                // 去除末尾空白
+                size_t end = system_prompt_cache_.find_last_not_of(" \t\n\r");
+                if (end != std::string::npos) {
+                    system_prompt_cache_ = system_prompt_cache_.substr(0, end + 1);
+                }
+                LOG_INFO("已加载 system_prompt_path: " + prompt_path);
+            }
+        }
+
         return true;
     } catch (const json::parse_error& e) {
         LOG_ERROR("JSON解析错误: " + std::string(e.what()));
@@ -108,26 +126,11 @@ ConfigManager::AgentConfig ConfigManager::getAgentConfig() const {
     if (config_.empty()) return cfg;
     const json& agent = config_.value("agent", json::object());
 
-    cfg.system_prompt = agent.value("system_prompt",
-        "你是一个有帮助的AI助手。");
+    // 优先使用缓存的 system_prompt（来自 system_prompt_path 文件）
+    cfg.system_prompt = system_prompt_cache_;
     cfg.system_prompt_path = agent.value("system_prompt_path", "");
     cfg.max_iterations = agent.value("max_iterations", 50);
     cfg.stop_on_error = agent.value("stop_on_error", true);
-
-    // 如果配置了 system_prompt_path，尝试从文件读取
-    if (!cfg.system_prompt_path.empty()) {
-        std::ifstream file(cfg.system_prompt_path);
-        if (file.is_open()) {
-            std::stringstream buffer;
-            buffer << file.rdbuf();
-            cfg.system_prompt = buffer.str();
-            // 去除末尾的空白字符
-            size_t end = cfg.system_prompt.find_last_not_of(" \t\n\r");
-            if (end != std::string::npos) {
-                cfg.system_prompt = cfg.system_prompt.substr(0, end + 1);
-            }
-        }
-    }
 
     return cfg;
 }

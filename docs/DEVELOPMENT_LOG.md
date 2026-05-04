@@ -570,6 +570,51 @@ Skills: /home/jason/.clawagent/skills
 
 ---
 
+## 2026-05-04
+
+### 系统提示词重构
+
+**目标**: 优化系统提示词结构，支持二次开发自定义
+
+#### 1. 提示词分层设计
+
+将系统提示词分为两部分：
+- **项目自定义规则** - 来自 `system_prompt.md`，二次开发者可自定义
+- **基座行为规范** - 代码中的固定部分
+
+#### 2. system_prompt_path 缓存机制
+
+**问题**: `chdir` 切换工作目录后，`system_prompt_path` 相对路径无法找到
+
+**解决**: 在 `ConfigManager::load()` 时预读取文件内容到缓存
+
+#### 3. 工具描述中文化
+
+将 read/write/exec 工具的 description 改为中文
+
+#### 4. getOSInfo Android 兼容
+
+添加 `/system/build.prop` 检查，获取 Android 系统信息
+
+#### 5. system_prompt.md 作为插入点
+
+作为二次开发插入点模板
+
+#### 修改的文件
+
+| 文件 | 变更 |
+|------|------|
+| `config.json` | `full_content_skills` 改为 `[]`，添加 `system_prompt_path` |
+| `include/config/ConfigManager.hpp` | 添加 `system_prompt_cache_` 缓存 |
+| `src/config/ConfigManager.cpp` | 加载时预读取 system_prompt_path |
+| `src/agent/AgentRuntime.cpp` | 提示词分层设计，固定内容硬编码 |
+| `src/tools/ToolManager.cpp` | 工具描述中文化，Android 兼容 |
+| `src/workspace/WorkspaceManager.cpp` | 简化默认 AGENTS.md |
+| `system_prompt.md` | 新增，作为二次开发插入点模板 |
+| `docs/DEVELOPMENT_LOG.md` | 开发日志更新 |
+
+---
+
 **开发人员**: Claude Code
 **项目状态**: 开发中
 **版本**: 1.0.0

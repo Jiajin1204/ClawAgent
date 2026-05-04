@@ -82,48 +82,40 @@ std::string AgentRuntime::buildSystemPrompt() {
 
     std::stringstream ss;
 
-    // 1. config.json system_prompt_path (优先)
+    // 1. system_prompt_path 内容作为项目自定义规则（插入点）
     if (!agent_config.system_prompt.empty()) {
+        ss << "# AGENTS.md\n\n";
+        ss << "## 项目自定义规则\n\n";
         ss << agent_config.system_prompt << "\n\n";
     }
 
-    // 2. AGENTS.md 内容 (最后备选)
-    if (ss.str().empty() && workspace_manager_) {
-        std::string agents_md = workspace_manager_->readAgentsMd();
-        if (!agents_md.empty()) {
-            ss << agents_md << "\n\n";
-        }
-    }
+    // 2. 基座行为规范
+    ss << "## 基座行为规范\n\n";
+    ss << "你是一个有帮助的 AI 助手。\n\n";
+    ss << "1. **并行与串行**：独立命令可并行调用，依赖性命令需串行（等待结果）。\n";
+    ss << "2. **错误处理**：出错需分析原因并修复，无法完成需明确告知。\n";
+    ss << "3. **Skill 加载**：当用户任务涉及某个 Skill 时，若上下文仅包含元数据，请先使用 `read` 工具读取该 Skill 的完整内容，再执行任务。\n\n";
+    ss << "=== 工具使用说明 ===\n\n";
+    ss << "文件操作注意:\n";
+    ss << "- 默认工作目录是 workspace\n";
+    ss << "- 读写普通文件时，可使用相对路径（相对于 workspace）或绝对路径\n\n";
+    ss << "Skill 存放与加载策略:\n";
+    ss << "1. **双层加载**：系统会同时加载「全局 Skills」和「工作区 Skills」。\n";
+    ss << "2. **新建 Skill 路径**：当你使用 `skill-creator` 或自主创建新 Skill 时，**必须存放在工作区目录下**，即：`${工作目录}/skills/<skill-name>/SKILL.md`。\n";
+    ss << "3. **读取规则**：遇到 Skill 调用时，若上下文仅包含元数据，请务必先使用 `read` 工具读取对应路径的完整内容。\n\n";
 
-    // 2. Skills 内容 (如果配置了)
+    // 3. Skills 内容 (如果配置了)
     if (skill_manager_) {
         std::string skills_context = skill_manager_->getSkillsContext();
         if (!skills_context.empty()) {
-            ss << "=== 可用 Skills ===\n";
+            ss << "\n=== 可用 Skills ===\n";
             ss << skills_context << "\n";
         }
     }
 
-    // 3. 动态上下文
+    // 4. 动态上下文
     ss << "=== 动态上下文 ===\n";
     ss << getDynamicContext();
-
-    // 4. 工具使用说明
-    ss << "\n=== 工具使用说明 ===\n";
-    ss << "你可以使用以下工具来完成任务:\n";
-    ss << "- read: 读取文件内容\n";
-    ss << "- write: 写入文件内容\n";
-    ss << "- exec: 执行命令或脚本\n";
-    ss << "\n重要:\n";
-    ss << "1. 如果需要执行多条命令，可以一次调用多个工具\n";
-    ss << "2. 工具调用后请等待结果再决定下一步\n";
-    ss << "3. 如果出错，请分析原因并尝试修复\n";
-    ss << "4. 如果无法完成任务，请明确告知用户\n";
-    ss << "\n文件操作注意:\n";
-    ss << "- 默认工作目录是 workspace (" << (workspace_manager_ ? workspace_manager_->getWorkspace() : ".") << ")\n";
-    ss << "- 写入文件时请使用相对路径（相对于 workspace）或绝对路径\n";
-    ss << "- 创建新 skill 时，存放在 ${工作目录}/skills/<skill-name>/SKILL.md\n";
-    ss << "- Skill 上下文可能只包含元数据（名称、描述、路径），需要完整内容时请使用 read 工具读取对应路径\n";
 
     return ss.str();
 }

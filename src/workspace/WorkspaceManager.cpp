@@ -166,12 +166,7 @@ void WorkspaceManager::createDirectories() {
         std::ofstream file(agents_md_path_);
         if (file.is_open()) {
             file << "# AGENTS.md\n\n";
-            file << "你是一个有帮助的 AI 助手。\n\n";
-            file << "## 行为规范\n\n";
-            file << "- 如果需要执行多条命令，可以一次调用多个工具\n";
-            file << "- 工具调用后请等待结果再决定下一步\n";
-            file << "- 如果出错，请分析原因并尝试修复\n";
-            file << "- 如果无法完成任务，请明确告知用户\n";
+            file << "你是一个有帮助的 AI 助手。\n";
             file.close();
             Logger::instance().info("已创建默认 AGENTS.md: " + agents_md_path_);
         }

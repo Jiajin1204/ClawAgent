@@ -210,13 +210,27 @@ bool SystemTools::pathExists(const std::string& path) {
 std::string SystemTools::getOSInfo() {
     std::string info;
 
-    // 读取/etc/os-release
+    // 读取/etc/os-release (Linux 发行版)
     std::ifstream release("/etc/os-release");
     if (release.is_open()) {
         std::string line;
         while (std::getline(release, line)) {
             if (line.substr(0, 5) == "NAME=" || line.substr(0, 7) == "VERSION=") {
                 info += line + "\n";
+            }
+        }
+    }
+
+    // Android 检查 /system/build.prop
+    if (info.empty()) {
+        std::ifstream android("/system/build.prop");
+        if (android.is_open()) {
+            std::string line;
+            while (std::getline(android, line)) {
+                if (line.substr(0, 7) == "ro.build") {
+                    info += line + "\n";
+                    if (info.size() > 200) break;  // 限制输出长度
+                }
             }
         }
     }
@@ -259,7 +273,7 @@ void ToolManager::registerDefaultTools() {
     if (enable_read_) {
         Tool read_tool;
         read_tool.name = "read";
-        read_tool.description = "Read file content";
+        read_tool.description = "读取文件内容";
         read_tool.type = Tool::Type::Read;
         read_tool.parameters = json{
             {"type", "object"},
@@ -278,7 +292,7 @@ void ToolManager::registerDefaultTools() {
     if (enable_write_) {
         Tool write_tool;
         write_tool.name = "write";
-        write_tool.description = "Write content to file";
+        write_tool.description = "写入文件内容";
         write_tool.type = Tool::Type::Write;
         write_tool.parameters = json{
             {"type", "object"},
@@ -301,7 +315,7 @@ void ToolManager::registerDefaultTools() {
     if (enable_exec_) {
         Tool exec_tool;
         exec_tool.name = "exec";
-        exec_tool.description = "Execute shell command";
+        exec_tool.description = "执行命令或脚本";
         exec_tool.type = Tool::Type::Exec;
         exec_tool.parameters = json{
             {"type", "object"},

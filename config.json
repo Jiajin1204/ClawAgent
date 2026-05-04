@@ -4,7 +4,7 @@
     },
     "skills": {
         "load_mode": "startup",
-        "full_content_skills": ["*"]
+        "full_content_skills": []
     },
     "model": {
         "provider": "openai",

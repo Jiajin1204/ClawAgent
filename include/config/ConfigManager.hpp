@@ -45,8 +45,8 @@ public:
 
     // Agent配置
     struct AgentConfig {
-        std::string system_prompt;       // 回退用的系统提示词
-        std::string system_prompt_path;  // 系统提示词文件路径（优先级高于 system_prompt）
+        std::string system_prompt;       // 系统提示词（来自配置字段或 system_prompt_path 文件）
+        std::string system_prompt_path;  // 系统提示词文件路径，配置后会覆盖 system_prompt 字段
         int max_iterations;
         bool stop_on_error;
     };
@@ -95,6 +95,7 @@ public:
 private:
     json config_;
     std::string config_path_;
+    std::string system_prompt_cache_;  // 缓存 system_prompt_path 文件内容
     std::string expandEnvVars(const std::string& value) const;
 };
 
