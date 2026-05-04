@@ -158,6 +158,46 @@ export CLAWAGENT_LLM_KEY="your-api-key-here"
 | `agent.system_prompt_path` | 系统提示词文件路径（优先级高于 system_prompt）|
 | `tools.enable_*` | 启用/禁用各工具 |
 
+### Skills 配置
+
+Skills 是一种可复用的 skill 架构，存放于 skills 目录下。
+
+```json
+"skills": {
+    "load_mode": "startup",
+    "full_content_skills": ["*"]
+}
+```
+
+| 配置项 | 说明 |
+|--------|------|
+| `skills.load_mode` | `startup`: 启动时加载所有 skill 并缓存; `dynamic`: 运行时按需加载 |
+| `skills.full_content_skills` | 控制哪些 skill 注入完整内容 |
+
+**full_content_skills 注入规则：**
+
+| 值 | 结果 |
+|----|------|
+| `["*"]` | 所有 skill 完整内容注入 |
+| `["skill1", "skill2"]` | 指定 skill 完整内容，其他 skill 仅元数据 |
+| `[]` | 所有 skill 仅注入元数据（name + description） |
+
+**Skill 存放位置：**
+- Workspace skills: `<workspace>/skills/<skill-name>/SKILL.md`
+- 全局 skills: `~/.clawagent/skills/<skill-name>/SKILL.md`
+
+**目录结构示例：**
+```
+~/.clawagent/
+├── skills/                      # 全局 skills
+│   └── skill-creator/
+│       └── SKILL.md
+└── workspace/
+    └── skills/                  # Workspace skills
+        └── calculator/
+            └── SKILL.md
+```
+
 ### 系统提示词文件
 
 对于较长的系统提示词，可以使用独立的 Markdown 文件来配置，避免 JSON 中的转义问题：

@@ -184,8 +184,7 @@ ConfigManager::SkillsConfig ConfigManager::getSkillsConfig() const {
     const json& skills = config_.value("skills", json::object());
 
     cfg.load_mode = skills.value("load_mode", "startup");
-    cfg.inject_all = skills.value("inject_all", false);
-    cfg.enabled = skills.value("enabled", std::vector<std::string>());
+    cfg.full_content_skills = skills.value("full_content_skills", std::vector<std::string>{"*"});
 
     return cfg;
 }

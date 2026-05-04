@@ -92,8 +92,7 @@ ClawAgentCore::ClawAgentCore(const std::string& config_path)
         workspace_manager_->getWorkspace() + "/skills",
         workspace_manager_->getGlobalSkillsDir(),
         load_mode,
-        skills_config.inject_all,
-        skills_config.enabled
+        skills_config.full_content_skills
     );
     skill_manager_->loadSkills();
 

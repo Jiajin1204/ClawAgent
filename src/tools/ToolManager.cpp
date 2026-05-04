@@ -389,6 +389,7 @@ ToolExecutionResult ToolManager::executeTool(const std::string& tool_name,
                     throw std::out_of_range("filepath");
                 }
                 result = SystemTools::readFile(filepath);
+                result.tool_call_id = tool_call_id;
                 break;
             }
             case Tool::Type::Write: {

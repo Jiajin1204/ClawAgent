@@ -85,8 +85,7 @@ public:
     // Skills 配置
     struct SkillsConfig {
         std::string load_mode;     // "startup" 或 "dynamic"
-        bool inject_all;
-        std::vector<std::string> enabled;
+        std::vector<std::string> full_content_skills;  // ["*"]=全部完整, []=仅元数据, ["s1"]=指定完整
     };
     SkillsConfig getSkillsConfig() const;
 

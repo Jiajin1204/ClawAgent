@@ -475,3 +475,101 @@ Skills: /home/jason/.clawagent/skills
 **开发人员**: Claude Code
 **项目状态**: 开发中
 **版本**: 1.0.0
+
+---
+
+## 2026-05-03
+
+### Skill 系统完善
+
+#### 1. skill-creator skill
+
+创建了 `skills/skill-creator/SKILL.md`，用于指导 agent 如何创建新 skill。
+
+**关键设计**：
+- 告诉 agent 从系统提示词的「动态上下文」获取工作目录路径
+- 新建 skill 存放在 `workspace/skills/<skill-name>/SKILL.md`
+- 使用 `${工作目录}/skills/` 变量，而非硬编码路径
+
+#### 2. full_content_skills 配置重构
+
+将原有的 `inject_all` + `enabled` 改为更清晰的 `full_content_skills`：
+
+```json
+"skills": {
+    "load_mode": "startup",
+    "full_content_skills": ["*"]  // ["*"]=全部完整, []=仅元数据, ["s1"]=指定完整
+}
+```
+
+**注入规则**：
+| 值 | 结果 |
+|----|------|
+| `["*"]` | 所有 skill 完整内容注入 |
+| `["skill1", "skill2"]` | 指定 skill 完整内容，其他仅元数据 |
+| `[]` | 所有 skill 仅注入元数据（name + description + 路径） |
+
+#### 3. SKILL.md 解析修复
+
+**问题**：`parseSkillFile()` 将整个文件内容（包括 frontmatter）存入 `skill.content`，导致输出重复
+
+**修复**：正确分离 frontmatter 和 body
+- frontmatter 只用于解析 `name` 和 `description`
+- `skill.content` 只存 body 内容
+
+#### 4. 元数据注入路径
+
+当 skill 只注入元数据时，提供文件路径让模型可以自行读取：
+
+```
+## skill-creator
+描述: 当用户需要实现某个重复性任务时，创建可复用的 skill 给 agent 使用
+路径: /home/jason/.clawagent/skills/skill-creator/SKILL.md
+```
+
+系统提示词增加引导：
+```
+- Skill 上下文可能只包含元数据（名称、描述、路径），需要完整内容时请使用 read 工具读取对应路径
+```
+
+#### 5. Startup 模式缓存优化
+
+**问题**：`getSkillsContext()` 在 startup 模式下仍重复扫描目录
+
+**修复**：
+- `startup` 模式：直接使用 `loadSkills()` 缓存的 `skills_`
+- `dynamic` 模式：每次扫描目录
+
+#### 6. 研究参考项目
+
+调研了 Claude Code 和 OpenClaw 的 skill 设计：
+
+**Claude Code 要点**：
+- 渐进式加载（Progressive Disclosure）：元数据 → SKILL.md body → bundled resources
+- 条件激活：通过 `paths` frontmatter 按文件路径激活 skill
+- Skill 作为工具（SkillTool），模型通过工具调用触发
+
+**OpenClaw Skill Workshop**：
+- 自动捕获机制：将成功流程转为 workspace skill
+- `approvalPolicy: "pending"` - 需要审批后才写入
+
+#### 7. 修改的文件
+
+| 文件 | 变更 |
+|------|------|
+| `config.json` | `full_content_skills` 新配置 |
+| `include/config/ConfigManager.hpp` | SkillsConfig 结构体更新 |
+| `src/config/ConfigManager.cpp` | 解析新配置 |
+| `include/skill/SkillManager.hpp` | 注释和成员变量更新 |
+| `src/skill/SkillManager.cpp` | 重构解析逻辑 + 路径注入 + 缓存优化 |
+| `src/ClawAgent.cpp` | 构造函数参数更新 |
+| `src/agent/AgentRuntime.cpp` | 工具提示更新 |
+| `docs/workspace_and_skills_plan.md` | 文档更新 |
+| `README.md` | Skills 配置说明 |
+| `skills/skill-creator/SKILL.md` | 新增 skill 创建指南 |
+
+---
+
+**开发人员**: Claude Code
+**项目状态**: 开发中
+**版本**: 1.0.0

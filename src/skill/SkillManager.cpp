@@ -13,13 +13,11 @@ using namespace ClawAgent;
 SkillManager::SkillManager(const std::string& workspace_skills_dir,
                            const std::string& global_skills_dir,
                            LoadMode mode,
-                           bool inject_all,
-                           const std::vector<std::string>& enabled)
+                           const std::vector<std::string>& full_content_skills)
     : workspace_skills_dir_(workspace_skills_dir)
     , global_skills_dir_(global_skills_dir)
     , load_mode_(mode)
-    , enabled_skills_(enabled.begin(), enabled.end())
-    , inject_all_(inject_all) {
+    , full_content_skills_(full_content_skills.begin(), full_content_skills.end()) {
 }
 
 void SkillManager::loadSkills() {
@@ -108,61 +106,66 @@ std::optional<Skill> SkillManager::parseSkillFile(const std::string& file_path,
 
     std::stringstream buffer;
     buffer << file.rdbuf();
-    std::string content = buffer.str();
+    std::string full_content = buffer.str();
 
-    // 简单解析: 尝试从开头解析 name 和 description
-    // 格式: ---
-    // name: xxx
-    // description: xxx
-    // ---
-    Skill skill;
-    skill.file_path = file_path;
-    skill.is_workspace_skill = is_workspace_skill;
-    skill.content = content;
-
-    // 从文件路径提取 name
-    size_t last_slash = file_path.find_last_of('/');
-    size_t second_last_slash = file_path.find_last_of('/', last_slash - 1);
-    if (last_slash != std::string::npos && second_last_slash != std::string::npos) {
-        skill.name = file_path.substr(second_last_slash + 1,
-                                      last_slash - second_last_slash - 1);
-    }
-
-    // 尝试解析 frontmatter
-    std::istringstream iss(content);
+    // 解析 frontmatter 和 body
+    std::istringstream iss(full_content);
     std::string line;
     bool in_frontmatter = false;
-    bool frontmatter_done = false;
+    bool past_frontmatter = false;
+    std::string frontmatter_content;
+    std::string body_content;
 
     while (std::getline(iss, line)) {
-        if (!frontmatter_done && line.substr(0, 3) == "---") {
+        if (!past_frontmatter && line.substr(0, 3) == "---") {
             if (!in_frontmatter) {
                 in_frontmatter = true;
+                frontmatter_content = "";
             } else {
-                frontmatter_done = true;
+                past_frontmatter = true;
             }
             continue;
         }
 
-        if (in_frontmatter && !frontmatter_done) {
-            if (line.substr(0, 12) == "description:") {
-                skill.description = line.substr(12);
-                while (skill.description.size() > 0 &&
-                       (skill.description[0] == ' ' || skill.description[0] == '\r')) {
-                    skill.description = skill.description.substr(1);
-                }
-            } else if (line.substr(0, 5) == "name:") {
-                skill.name = line.substr(5);
-                while (skill.name.size() > 0 &&
-                       (skill.name[0] == ' ' || skill.name[0] == '\r')) {
-                    skill.name = skill.name.substr(1);
-                }
+        if (!past_frontmatter) {
+            // 在 frontmatter 中
+            frontmatter_content += line + "\n";
+        } else {
+            // body 内容
+            body_content += line + "\n";
+        }
+    }
+
+    Skill skill;
+    skill.file_path = file_path;
+    skill.is_workspace_skill = is_workspace_skill;
+    skill.content = body_content;
+
+    // 从 frontmatter 解析 name 和 description
+    std::istringstream fm_iss(frontmatter_content);
+    while (std::getline(fm_iss, line)) {
+        if (line.substr(0, 12) == "description:") {
+            skill.description = line.substr(12);
+            while (!skill.description.empty() &&
+                   (skill.description[0] == ' ' || skill.description[0] == '\r')) {
+                skill.description = skill.description.substr(1);
+            }
+        } else if (line.substr(0, 5) == "name:") {
+            skill.name = line.substr(5);
+            while (!skill.name.empty() &&
+                   (skill.name[0] == ' ' || skill.name[0] == '\r')) {
+                skill.name = skill.name.substr(1);
             }
         }
+    }
 
-        // 找到第一个 # 开头的行作为标题
-        if (frontmatter_done && line.substr(0, 1) == "#") {
-            break;
+    // 如果 frontmatter 没有 name，从文件路径提取
+    if (skill.name.empty()) {
+        size_t last_slash = file_path.find_last_of('/');
+        size_t second_last_slash = file_path.find_last_of('/', last_slash - 1);
+        if (last_slash != std::string::npos && second_last_slash != std::string::npos) {
+            skill.name = file_path.substr(second_last_slash + 1,
+                                          last_slash - second_last_slash - 1);
         }
     }
 
@@ -235,11 +238,37 @@ std::string SkillManager::getSkillsContext() const {
 
     bool has_any_skill = false;
 
-    // 工作区 skills
-    addSkillsFromDirectory(workspace_skills_dir_, ss, true, has_any_skill);
+    if (load_mode_ == LoadMode::Startup) {
+        // Startup 模式：使用缓存的 skills_
+        for (const auto& skill : skills_) {
+            // 判断是否需要完整内容注入
+            bool needs_full_content = false;
+            if (full_content_skills_.count("*") > 0) {
+                needs_full_content = true;
+            } else if (full_content_skills_.count(skill.name) > 0) {
+                needs_full_content = true;
+            }
 
-    // 全局 skills
-    addSkillsFromDirectory(global_skills_dir_, ss, false, has_any_skill);
+            // 所有 skill 都注入元数据
+            ss << "## " << skill.name << "\n";
+            ss << "描述: " << skill.description << "\n";
+
+            // 如果需要完整内容，追加完整内容
+            if (needs_full_content) {
+                ss << "---\n";
+                ss << skill.content << "\n\n";
+            } else {
+                // 只注入元数据时，提供路径让模型可以自行读取
+                ss << "路径: " << skill.file_path << "\n\n";
+            }
+
+            has_any_skill = true;
+        }
+    } else {
+        // Dynamic 模式：每次扫描目录
+        addSkillsFromDirectory(workspace_skills_dir_, ss, true, has_any_skill);
+        addSkillsFromDirectory(global_skills_dir_, ss, false, has_any_skill);
+    }
 
     if (!has_any_skill) {
         return "";
@@ -273,28 +302,31 @@ void SkillManager::addSkillsFromDirectory(const std::string& dir,
             continue;
         }
 
-        // 检查是否需要注入
-        if (!inject_all_ && !enabled_skills_.empty()) {
-            if (enabled_skills_.find(name) == enabled_skills_.end()) {
-                continue;
-            }
-        }
-
-        // 读取内容
-        std::ifstream file(skill_file);
-        if (!file.is_open()) {
-            continue;
-        }
-
         auto skill = parseSkillFile(skill_file, is_workspace);
         if (!skill) {
             continue;
         }
 
+        // 判断是否需要完整内容注入
+        bool needs_full_content = false;
+        if (full_content_skills_.count("*") > 0) {
+            needs_full_content = true;
+        } else if (full_content_skills_.count(name) > 0) {
+            needs_full_content = true;
+        }
+
+        // 1. 所有 skill 都注入元数据
         ss << "## " << skill->name << "\n";
         ss << "描述: " << skill->description << "\n";
-        ss << "---\n";
-        ss << skill->content << "\n\n";
+
+        // 2. 如果需要完整内容，追加完整内容
+        if (needs_full_content) {
+            ss << "---\n";
+            ss << skill->content << "\n\n";
+        } else {
+            // 只注入元数据时，提供路径让模型可以自行读取
+            ss << "路径: " << skill->file_path << "\n\n";
+        }
 
         has_any_skill = true;
     }

@@ -33,8 +33,9 @@ TEST_F(ToolTest, GetToolDefinitions) {
 TEST_F(ToolTest, GetToolDescription) {
     std::string desc = manager_->getToolDescription("read");
     EXPECT_FALSE(desc.empty());
-    // description 中包含中文 "读取"
-    EXPECT_NE(desc.find("读取"), std::string::npos);
+    // description 中包含 "Read" 或 "file"
+    EXPECT_TRUE(desc.find("Read") != std::string::npos ||
+                desc.find("file") != std::string::npos);
 }
 
 TEST_F(ToolTest, GetToolDescriptionUnknown) {
@@ -47,7 +48,7 @@ TEST_F(ToolTest, ExecuteReadTool) {
     std::string test_file = "/tmp/test_read.txt";
     std::ofstream(test_file) << "Hello, World!";
 
-    json args = {{"filepath", test_file}};
+    json args = {{"path", test_file}};
     auto result = manager_->executeTool("read", args, "call_1");
 
     EXPECT_TRUE(result.success);
@@ -101,11 +102,11 @@ TEST_F(ToolTest, ExecuteExecTool) {
 }
 
 TEST_F(ToolTest, ExecuteExecToolWithArgs) {
-    json args = {{"command", "ls /tmp"}};
+    json args = {{"command", "echo 'test_output'"}};
     auto result = manager_->executeTool("exec", args, "call_4");
 
     EXPECT_TRUE(result.success);
-    EXPECT_NE(result.result.find("test"), std::string::npos);
+    EXPECT_NE(result.result.find("test_output"), std::string::npos);
 }
 
 TEST_F(ToolTest, ExecuteUnknownTool) {

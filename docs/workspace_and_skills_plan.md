@@ -96,11 +96,47 @@ description: 简短描述
     },
     "skills": {
         "load_mode": "startup",            // startup: 启动时加载, dynamic: 运行时动态加载
-        "inject_all": false,              // true: 所有 skill 注入上下文, false: 仅注入启用的
-        "enabled": ["example-skill"]       // 启用的 skill 列表，空表示全部
+        "full_content_skills": ["*"]       // ["*"]: 所有 skill 完整内容注入
+                                           // ["skill1","skill2"]: 指定 skill 完整内容，其他仅元数据
+                                           // []: 所有 skill 仅元数据
     }
 }
 ```
+
+### 3. Skill 上下文注入规则
+
+**核心原则：目录下所有 skill 都会注入（至少元数据）**
+
+| full_content_skills | 结果 |
+|---------------------|------|
+| `["*"]` | 所有 skill 完整内容注入 |
+| `["skill1", "skill2"]` | skill1、skill2 完整内容 + 其他所有 skill 仅元数据 |
+| `[]` | 所有 skill 仅元数据注入 |
+
+**注入内容格式：**
+- 元数据：skill name + description（每个 skill 都会有）
+- 完整内容：Workflow + When to Use 等完整 SKILL.md 内容
+
+```markdown
+=== 可用 Skills ===
+
+## skill-name
+描述: 示例 skill
+---
+# Skill Title
+
+## Workflow
+- 步骤 1
+- 步骤 2
+
+## When to Use
+适用于...
+```
+
+**说明：**
+- `full_content_skills` 控制哪些 skill 获得完整内容
+- `["*"]` 是便捷写法，等价于所有 skill 完整内容
+- 非 `["*"]` 时，每个 skill 都会注入元数据，只有列表中的 skill 额外获得完整内容
 
 ### 3. 项目内置 Skills
 
@@ -245,8 +281,7 @@ private:
     std::string workspace_skills_dir_;
     std::string global_skills_dir_;
     LoadMode load_mode_;
-    std::set<std::string> enabled_skills_;  // 启用的 skill 列表
-    bool inject_all_;
+    std::set<std::string> full_content_skills_;  // 需要完整内容的 skill 列表 ["*"] 表示全部
 };
 ```
 
@@ -269,9 +304,9 @@ private:
 ```
 
 **上下文注入规则**:
-- `inject_all=true`: 所有 skill 内容都注入上下文
-- `inject_all=false`: 仅注入 `enabled` 列表中的 skill
-- `enabled=[]`: 仅注入内置/默认 skill
+- `full_content_skills=["*"]`: 所有 skill 完整内容注入
+- `full_content_skills=["skill1"]`: skill1 完整内容，其他仅元数据
+- `full_content_skills=[]`: 所有 skill 仅元数据
 
 ### Phase 3: 集成测试
 
@@ -314,9 +349,8 @@ private:
         "workspace": "${home}/workspace"
     },
     "skills": {
-        "load_mode": "dynamic",
-        "inject_all": false,
-        "enabled": []
+        "load_mode": "startup",
+        "full_content_skills": ["*"]
     }
 }
 ```

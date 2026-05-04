@@ -16,8 +16,9 @@ namespace ClawAgent {
  * - dynamic: 运行时按需加载 skill
  *
  * 上下文注入:
- * - inject_all=true: 所有 skill 内容都注入上下文
- * - inject_all=false: 仅注入 enabled 列表中的 skill
+ * - full_content_skills=["*"]: 所有 skill 完整内容注入
+ * - full_content_skills=["s1","s2"]: 指定 skill 完整内容，其他仅元数据
+ * - full_content_skills=[]: 所有 skill 仅元数据
  */
 class SkillManager {
 public:
@@ -27,8 +28,7 @@ public:
     SkillManager(const std::string& workspace_skills_dir,
                  const std::string& global_skills_dir,
                  LoadMode mode,
-                 bool inject_all,
-                 const std::vector<std::string>& enabled);
+                 const std::vector<std::string>& full_content_skills);
 
     // 禁用拷贝
     SkillManager(const SkillManager&) = delete;
@@ -79,8 +79,7 @@ private:
     std::string workspace_skills_dir_;
     std::string global_skills_dir_;
     LoadMode load_mode_;
-    std::set<std::string> enabled_skills_;
-    bool inject_all_;
+    std::set<std::string> full_content_skills_;  // 需要完整内容的 skill 列表
 };
 
 } // namespace ClawAgent

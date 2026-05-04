@@ -123,6 +123,7 @@ std::string AgentRuntime::buildSystemPrompt() {
     ss << "- 默认工作目录是 workspace (" << (workspace_manager_ ? workspace_manager_->getWorkspace() : ".") << ")\n";
     ss << "- 写入文件时请使用相对路径（相对于 workspace）或绝对路径\n";
     ss << "- 创建新 skill 时，存放在 ${工作目录}/skills/<skill-name>/SKILL.md\n";
+    ss << "- Skill 上下文可能只包含元数据（名称、描述、路径），需要完整内容时请使用 read 工具读取对应路径\n";
 
     return ss.str();
 }
@@ -187,6 +188,7 @@ bool AgentRuntime::step(const std::string& /*user_input*/, std::string& response
         Message system_msg;
         system_msg.role = "system";
         system_msg.content = buildSystemPrompt();
+        Logger::instance().info(">>> systemprop: " + system_msg.content);
         all_messages.push_back(system_msg);
 
         // 历史消息
